@@ -1,0 +1,33 @@
+---
+name: stock360rules
+description: Regras de programação e padrões do projeto
+---
+
+# Overview
+
+Estas regras definem padrões obrigatórios de código, segurança e organização para o projeto **stock360**.
+
+## Regras obrigatórias (sempre seguir)
+
+- **Idioma**: todo texto, nomes de variáveis e mensagens de erro podem ser em PT-BR; respostas do agente sempre em **Português-BR**.
+- **Gerenciador**: sempre usar **yarn** (nunca npm/pnpm) ao sugerir/rodar comandos.
+- **Padrão de imports**: preferir aliases `@/` conforme `tsconfig.json`.
+- **Organização de tipos**:
+  - Tipagens compartilhadas (DTOs, types de services, contratos de auth/user) devem ficar em `src/types/` (ex.: `src/types/user.types.ts`).
+  - Evitar declarar types/interfaces “grandes” dentro de controllers/services/rotas; nesses arquivos, apenas `import type ... from "@/types"`.
+- **Validação de entrada**:
+  - Rotas que recebem payload devem validar com **Zod** (`safeParse`) e retornar `400` com `issues` padronizado.
+  - Usar `.strict()` nos schemas para bloquear campos inesperados.
+  - **Schemas sempre em arquivo separado**: criar schemas Zod em `src/controller/<módulo>/schemas/*.schema.ts` (ex.: `src/controller/user/schemas/createUser.schema.ts`) para manter controllers/rotas organizados e “magros”.
+- **Segurança (Auth)**:
+  - **Nunca** retornar hash/senha/credenciais.
+  - Login deve retornar mensagem genérica para credenciais inválidas (evitar enumeração de usuário).
+  - JWT deve usar `env.JWT_SECRET` e expiração definida; incluir claims mínimos necessários (ex.: `userId`, `admin`).
+- **Boas práticas de service/controller**:
+  - Controllers “magros”: orquestram request/response e delegam regras para services.
+  - Services “gordos”: contêm regra de negócio e interagem com database.
+  - Lançar erros com `status` quando fizer sentido (ex.: 401/403/409) e manter mensagens claras.
+- **Código limpo**:
+  - Remover imports não usados.
+  - Preferir funções pequenas e nomes claros.
+  - Evitar duplicação de lógica (extrair para service/schema/types).
