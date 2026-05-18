@@ -16,7 +16,7 @@ import jwtMiddleware from "@/shared/middlewares/jwt.middleware";
 import adminMiddleware from "@/shared/middlewares/admin.middleware";
 import { parseSchema, handleError } from "@/shared/utils/error";
 import { paginationMiddleware } from "@/shared/utils/pagination";
-import MysqlService from '@/shared/infra/database/MySQLService';
+import { withTransaction } from "@/db/transaction";
 
 
 @Route("/user")
@@ -81,23 +81,20 @@ class UserController extends Controller {
     try {
       const data = parseSchema(createUserSchema, req.body);
 
-      await MysqlService.beginTransaction();
-
-      const created = await this.userService.createUser({
-        username: data.username,
-        email: data.email,
-        password: data.password,
-        is_active: data.is_active,
-        is_admin: data.is_admin,
+      const created = await withTransaction(async () => {
+        return await this.userService.createUser({
+          username: data.username,
+          email: data.email,
+          password: data.password,
+          is_active: data.is_active,
+          is_admin: data.is_admin,
+        });
       });
-
-      await MysqlService.commit();
 
       return res.status(201).json({
         data: created,
       });
     } catch (err) {
-      await MysqlService.rollback();
       return handleError(err, res);
     }
   }
@@ -118,17 +115,14 @@ class UserController extends Controller {
       const id = Number(req.params.id);
       const data = parseSchema(updateUserSchema, req.body);
 
-      await MysqlService.beginTransaction();
-
-      const updated = await this.userService.updateUser(id, data);
-
-      await MysqlService.commit();
+      const updated = await withTransaction(async () => {
+        return await this.userService.updateUser(id, data);
+      });
 
       return res.status(200).json({
         data: updated,
       });
     } catch (err) {
-      await MysqlService.rollback();
       return handleError(err, res);
     }
   }
@@ -146,17 +140,14 @@ class UserController extends Controller {
     try {
       const id = Number(req.params.id);
 
-      await MysqlService.beginTransaction();
-
-      await this.userService.deleteUser(id);
-
-      await MysqlService.commit();
+      await withTransaction(async () => {
+        await this.userService.deleteUser(id);
+      });
 
       return res.status(200).json({
         message: "Usuário desativado com sucesso",
       });
     } catch (err) {
-      await MysqlService.rollback();
       return handleError(err, res);
     }
   }

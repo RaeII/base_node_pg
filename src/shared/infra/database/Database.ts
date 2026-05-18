@@ -1,47 +1,28 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-import MysqlService from './MySQLService';
-import { PoolConnection } from 'mysql2/promise';
+import type { QueryResult, QueryResultRow } from "pg";
+import { query as pgQuery, type QueryOptions } from "@/db/client";
 
+/**
+ * Classe base para repositórios.
+ *
+ * Métodos do repositório chamam `this.query(sql, params)`.
+ * O wrapper resolve automaticamente:
+ * - O cliente da transação ativa (via `withTransaction`), se houver.
+ * - Caso contrário, usa o `writePool` em autocommit.
+ *
+ * Subclasses não precisam — e não devem — abrir/fechar conexões manualmente.
+ * Para transações, envolva a operação com `withTransaction` no controller/service.
+ */
 export default class Database {
-    protected connection: PoolConnection | null = null;
-    protected isInTransaction: boolean = false;
-
     constructor() {}
 
-    async getConnection(): Promise<PoolConnection> {
-        return await MysqlService.getConnection();
-    }
-
-    protected async query(sql: string, value: any = null): Promise<any> {
-        let connection: PoolConnection | null = null;
-        try {
-            connection = await this.getConnection();
-            if (value) {
-                return await connection.query(sql, value);
-            } else {
-                return await connection.query(sql);
-            }
-        } catch (error) {
-            if (await Database.isInTransaction()) await Database.rollback();
-            throw error;
-        } finally {
-            if (!MysqlService.isInTransaction()) await MysqlService.release();
-        }
-    }
-
-    public static async startTransaction() {
-        return await MysqlService.beginTransaction();
-    }
-
-    public static async rollback() {
-        return await MysqlService.rollback();
-    }
-
-    public static async commit() {
-        return await MysqlService.commit();
-    }
-
-    public static isInTransaction() {
-        return MysqlService.isInTransaction();
+    protected async query<T extends QueryResultRow = QueryResultRow>(
+        sql: string,
+        params?: unknown[],
+        opts?: QueryOptions
+    ): Promise<QueryResult<T>> {
+        return await pgQuery<T>(sql, params, opts);
     }
 }
+
+// Re-exporta para conveniência
+export { withTransaction, isInTransaction } from "@/db/transaction";

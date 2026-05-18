@@ -10,8 +10,8 @@ function toPublicUser(row: DbUserRow): PublicUser {
     id: row.id,
     username: row.username,
     email: row.email,
-    is_active: Number(row.is_active) === 1,
-    is_admin: Number(row.is_admin) === 1,
+    is_active: row.is_active,
+    is_admin: row.is_admin,
     last_login_at: row.last_login_at,
     created_at: row.created_at,
     updated_at: row.updated_at,
@@ -65,8 +65,7 @@ export default class UserService {
       throwUser("Credenciais inválidas", 401);
     }
 
-    const isActive = Number(row.is_active) === 1;
-    if (!isActive) {
+    if (!row.is_active) {
       throwUser("Usuário não encontrado", 403);
     }
 
@@ -167,7 +166,7 @@ export default class UserService {
       throwUser("Usuário não encontrado", 404);
     }
 
-    if (Number(existing.is_active) === 0) {
+    if (!existing.is_active) {
       throwUser("Usuário já está desativado", 400);
     }
 

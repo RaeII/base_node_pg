@@ -1,8 +1,20 @@
+---
+title: Guia PostgreSQL — Node.js + TypeScript
+tags:
+  - database
+  - postgresql
+  - production
+aliases:
+  - postgres
+  - pg config
+---
+
 # Guia rápido: PostgreSQL com Node.js + TypeScript (sem ORM)
 
 Configurações essenciais para usar `pg` (node-postgres) em produção com alta concorrência e segurança. Foco em decisões, não em código.
 
-> **Versões mínimas:** Node.js ≥ 20 LTS, `pg` ≥ 8.13.
+> [!info] Versões mínimas
+> Node.js ≥ 20 LTS, `pg` ≥ 8.13.
 
 ---
 
@@ -32,7 +44,8 @@ O pool é o componente que mais quebra em produção. Cinco armadilhas comuns:
 
 **Parâmetros que devem estar no `PoolConfig`:** `max`, `min`, `idleTimeoutMillis`, `connectionTimeoutMillis`, `maxLifetimeSeconds`, `statement_timeout`, `query_timeout`, `lock_timeout`, `idle_in_transaction_session_timeout`, `application_name`, `keepAlive`, `options`, `ssl`.
 
-**Sempre registre `pool.on('error')`** — sem isso, qualquer erro em client ocioso derruba o processo.
+> [!warning] Sempre registre `pool.on('error')`
+> Sem isso, qualquer erro em client ocioso derruba o processo.
 
 ### 3.1 Dimensionamento do pool
 
@@ -68,13 +81,15 @@ Encapsule `pool.query` para adicionar:
 - **Slow query log:** loga queries acima de um threshold configurável (ex: 500ms).
 - **Retry para erros transientes:** classes `08*` (Connection Exception), `57P03` (cannot_connect_now), `40001`/`40P01` (raros em autocommit mas possíveis), e erros de socket Node.js (`ECONNRESET`, `ECONNREFUSED`, `EPIPE`). Use backoff exponencial com jitter.
 
-> **Cuidado:** retry em escrita autocommit só é seguro se a query for **idempotente** (`UPDATE ... WHERE id`, `DELETE`, `INSERT ... ON CONFLICT DO NOTHING`). Para `INSERT` simples ou updates baseados em contadores, desabilite retry.
+> [!warning] Retry em escrita autocommit
+> Retry só é seguro se a query for **idempotente** (`UPDATE ... WHERE id`, `DELETE`, `INSERT ... ON CONFLICT DO NOTHING`). Para `INSERT` simples ou updates baseados em contadores, desabilite retry.
 
 ---
 
 ## 5. Queries parametrizadas
 
-**Regra absoluta:** use sempre placeholders `$1, $2`. Nunca concatene input na string SQL.
+> [!danger] Regra absoluta
+> Use sempre placeholders `$1, $2`. Nunca concatene input na string SQL.
 
 **Listas dinâmicas (IN):** use `ANY($1::int[])` com array.
 
@@ -92,13 +107,12 @@ Três regras críticas:
 
 3. **Retry para `40001` (serialization) e `40P01` (deadlock)** com backoff exponencial + jitter. **Importante:** deadlock pode ocorrer em qualquer isolation level, inclusive READ COMMITTED. Default de retries: 3 para SERIALIZABLE, 2 para os demais.
 
-### ⚠️ Idempotência em transações retryáveis
+### Idempotência em transações retryáveis
 
-A função passada para `withTransaction` **pode ser executada mais de uma vez**. Consequências:
-
-- **Não envie email/SMS, não chame API externa, não publique em fila dentro da função.** Esses efeitos vão acontecer múltiplas vezes em caso de retry.
-- **Não dependa de timestamps capturados antes do BEGIN.**
-- **Pattern recomendado: outbox.** Escreva o evento numa tabela `outbox` dentro da transação. Um worker separado consome a outbox e dispara efeitos colaterais com deduplicação.
+> [!warning] A função passada para `withTransaction` pode ser executada mais de uma vez
+> - **Não envie email/SMS, não chame API externa, não publique em fila dentro da função.** Esses efeitos vão acontecer múltiplas vezes em caso de retry.
+> - **Não dependa de timestamps capturados antes do BEGIN.**
+> - **Pattern recomendado: outbox.** Escreva o evento numa tabela `outbox` dentro da transação. Um worker separado consome a outbox e dispara efeitos colaterais com deduplicação.
 
 ### Cleanup correto
 
@@ -128,7 +142,8 @@ Defina `CONNECTION LIMIT` em cada um.
 
 ### Gotcha crítica: `ALTER DEFAULT PRIVILEGES`
 
-Default privileges só se aplicam a objetos criados pelo role indicado em `FOR ROLE`. Se as migrações rodam com `migration_user`, esse é o role que precisa estar no `FOR ROLE` — não o usuário atual da sessão. Esquecer isso significa que novas tabelas não vão herdar permissões para `app_user`, e você descobre quando uma feature nova quebra em produção.
+> [!danger] FOR ROLE obrigatório
+> Default privileges só se aplicam a objetos criados pelo role indicado em `FOR ROLE`. Se as migrações rodam com `migration_user`, esse é o role que precisa estar no `FOR ROLE` — não o usuário atual da sessão. Esquecer isso significa que novas tabelas não vão herdar permissões para `app_user`, e você descobre quando uma feature nova quebra em produção.
 
 ### Autenticação
 
@@ -152,7 +167,8 @@ Solução: toda migração de DDL deve começar com `SET lock_timeout = '2s'` (m
 
 Use `pg-cursor` para queries que retornam muitos registros. Carregar tudo em memória causa OOM.
 
-**Cleanup correto:** mesma regra da seção 6 — `client.release(true)` no caminho de erro, incluindo erro no `cursor.close()`.
+> [!warning] Cleanup em streaming
+> Mesma regra da seção 6 — `client.release(true)` no caminho de erro, incluindo erro no `cursor.close()`.
 
 ---
 
@@ -179,12 +195,13 @@ Três métricas essenciais para Prometheus/Datadog:
 - **`pool.idleCount`:** conexões ociosas disponíveis.
 - **`pool.waitingCount`:** requisições aguardando conexão.
 
-**`waitingCount > 0` é o alarme de incêndio** — requisições estão na fila, o banco vai saturar em seguida.
+> [!danger] `waitingCount > 0` é o alarme de incêndio
+> Requisições estão na fila — o banco vai saturar em seguida.
 
 **Alertas sugeridos:**
 
 | Sinal | Significado | Ação |
-|---|---|---|
+| --- | --- | --- |
 | `waiting > 0` por 30s+ | Pool saturado | P1: escalar ou investigar query lenta |
 | `idle/total < 0.1` sustentado | Subdimensionado | Aumentar `max` ou otimizar |
 | `connection timeout` recorrente | Pool insuficiente | Escalar horizontal |
@@ -221,7 +238,7 @@ Quando você tem dezenas/centenas de instâncias, PgBouncer entra entre app e Po
 ### O que NÃO funciona
 
 | Recurso | Status | Alternativa |
-|---|---|---|
+| --- | --- | --- |
 | `SET` fora de transação | ❌ afeta conexões aleatórias | Use `options` ou `SET LOCAL` em transação |
 | `LISTEN/NOTIFY` | ❌ precisa sessão persistente | Conexão direta, sem PgBouncer |
 | Prepared statements nomeados | ⚠️ requer PgBouncer ≥ 1.21 + `max_prepared_statements > 0` | Use unnamed (default) |
@@ -270,7 +287,7 @@ Quem chama decide o exit code. `drain()` faz só o trabalho de fechar. `graceful
 ### `postgresql.conf` essencial
 
 | Parâmetro | Valor | Observação |
-|---|---|---|
+| --- | --- | --- |
 | `max_connections` | 100–200 | PgBouncer se precisar de mais |
 | `shared_buffers` | 25% da RAM | |
 | `effective_cache_size` | 50–75% da RAM | |
@@ -286,7 +303,8 @@ Quem chama decide o exit code. `drain()` faz só o trabalho de fechar. `graceful
 | `idle_in_transaction_session_timeout` | `30s` | |
 | `transaction_timeout` (PG 17+) | `120s` | Duração total de transação |
 
-**Não configure `lock_timeout` no `postgresql.conf`** — afeta sessões administrativas. Configure por aplicação.
+> [!warning] `lock_timeout` no `postgresql.conf`
+> **Não configure** — afeta sessões administrativas. Configure por aplicação no `PoolConfig`.
 
 ### `pg_hba.conf`
 
@@ -297,7 +315,7 @@ Use `hostssl` com `scram-sha-256`. Bloqueie `hostnossl all all 0.0.0.0/0 reject`
 `ssl: true` apenas criptografa, não valida quem está do outro lado.
 
 | Modo | `rejectUnauthorized` | CA | Uso |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `require` | `false` | — | ❌ não usar em produção |
 | `verify-ca` | `true` | sim | aceitável em rede privada |
 | `verify-full` | `true` + `checkServerIdentity` | sim | ✅ **produção** (protege contra MITM) |
@@ -378,3 +396,10 @@ migrations/              # SQL (rodado pelo migration_user)
 scripts/migrate.ts       # runner com lock_timeout agressivo
 .env / .env.example
 ```
+
+---
+
+## Relacionado
+
+- [[structure|Estrutura do Projeto]] — como o projeto atual organiza o acesso ao banco
+- [[core/error-handling|Tratamento de Erros]] — `throwInternal` para erros de banco

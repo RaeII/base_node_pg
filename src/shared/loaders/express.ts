@@ -7,7 +7,6 @@ import {
   ErrorRequestHandler,
 } from "express";
 import cors from "cors";
-import { connectionMiddleware } from "@/shared/utils/async_local_storage";
 
 /**
  * Registra os middlewares que devem ser executados ANTES das rotas.
@@ -25,9 +24,6 @@ export function loadPreRouteMiddlewares(app: Application) {
   }
 
   app.use(cors(options));
-
-  // Inicializa o contexto do AsyncLocalStorage por request (necessário para o MySQLService.getConnection)
-  app.use(connectionMiddleware());
 }
 
 /**
