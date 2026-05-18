@@ -1,5 +1,29 @@
 {
   "enabledPlugins": {
     "obsidian@obsidian-skills": true
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd /Users/israel/dev/base_node_pg && npx tsc --noEmit 2>&1 | head -30"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "input=$(cat); file=$(echo \"$input\" | grep -o '\"file_path\":\"[^\"]*\"' | cut -d'\"' -f4); if echo \"$file\" | grep -qE '(\\.env)$'; then echo 'Bloqueado: edite .env.example em vez de .env diretamente'; exit 1; fi"
+          }
+        ]
+      }
+    ]
   }
 }

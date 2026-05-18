@@ -201,6 +201,16 @@
   },
   "active": "8161c01ae408b735",
   "lastOpenFiles": [
+    "postgres-config.md",
+    "modules/users.md",
+    "modules/auth.md",
+    "modules",
+    "guides/schemas-zod.md",
+    "guides/new-module.md",
+    "guides",
+    "core/error-handling.md",
+    "core/decorators.md",
+    "core",
     "structure.md",
     "postgre-config.md",
     "index-doc.md"
