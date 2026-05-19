@@ -35,15 +35,27 @@ const baseConfig: PoolConfig = {
 };
 
 export const writePool = new Pool(baseConfig);
-
-// Obrigatório — sem isso erro em client ocioso derruba o processo
 writePool.on("error", (err) => {
-    logger.error("Pool idle client error", { err: err instanceof Error ? err.message : String(err) });
+    logger.error("Write pool idle client error", { err: err instanceof Error ? err.message : String(err) });
+});
+
+// Read pool aponta à réplica quando DB_READ_HOST está definido, senão reutiliza o primário.
+// application_name distinto separa tráfego read/write no pg_stat_activity e no PgBouncer.
+export const readPool = new Pool({
+    ...baseConfig,
+    host: env.DB_READ_HOST || env.DB_HOST,
+    port: env.DB_READ_PORT || env.DB_PORT,
+    max: env.DB_READ_POOL_MAX || env.DB_POOL_MAX,
+    min: env.DB_READ_POOL_MIN,
+    application_name: `${env.APP_NAME}_read`,
+});
+readPool.on("error", (err) => {
+    logger.error("Read pool idle client error", { err: err instanceof Error ? err.message : String(err) });
 });
 
 export const drainPool = async (timeoutMs = 10_000): Promise<void> => {
     await Promise.race([
-        writePool.end(),
+        Promise.all([writePool.end(), readPool.end()]),
         new Promise<never>((_, reject) =>
             setTimeout(() => reject(new Error("Pool drain timeout")), timeoutMs)
         ),

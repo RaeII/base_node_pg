@@ -47,6 +47,15 @@ O pool é o componente que mais quebra em produção. Cinco armadilhas comuns:
 > [!warning] Sempre registre `pool.on('error')`
 > Sem isso, qualquer erro em client ocioso derruba o processo.
 
+### Defaults recomendados para alta concorrência (≥10k usuários)
+
+| Parâmetro | Valor | Por quê |
+| --- | --- | --- |
+| `connectionTimeoutMillis` | **2 s** (não 5 s) | Fila de 5 s sob picos causa thundering herd; fail-fast aciona circuit breaker antes |
+| `idle_in_transaction_session_timeout` | **15 s** (não 30 s) | Tx ociosa por 30 s segura locks e provoca efeito cascata; 15 s mantém margem mas reduz dano |
+| `lock_timeout` | 2–3 s | Sob contenção alta pode cair para 1–2 s |
+| `maxLifetimeSeconds` | 1800 | Recicla conexões antes de balanceadores (Aurora, PgBouncer) as cortarem |
+
 ### 3.1 Dimensionamento do pool
 
 Use abordagem orçamentária, não a fórmula `cores × 2 + spindles`:
@@ -153,13 +162,38 @@ Use `scram-sha-256`, nunca `md5`. Default em PG ≥ 14, mas confirme com `SHOW p
 
 ## 9. Migrações sem ORM
 
-Use `node-pg-migrate` ou `dbmate`. SQL versionado em `migrations/`, executado em ordem, rodando com `migration_user` **antes** do deploy da aplicação.
+SQL versionado em `migrations/`, executado em ordem, rodando com `migration_user` **antes** do deploy da aplicação. Opções: `node-pg-migrate`, `dbmate`, ou runner customizado (este projeto usa o último).
+
+### Runner customizado no projeto
+
+`scripts/migrate.ts` — standalone, sem dependência nova. Características:
+
+- **Aplica `SET lock_timeout='2s' + statement_timeout='60s'`** antes de cada migração.
+- **Retry com backoff exponencial** quando `55P03` (`lock_not_available`).
+- **Cleanup correto:** `client.release(true)` em erros fatais de conexão; ROLLBACK + retry para os demais.
+- **Checksum SHA-256** detecta migrações já aplicadas que foram editadas — aborta antes de corromper o histórico.
+- **Tabela de controle `schema_migrations`** criada automaticamente.
+- **Conecta com `DB_MIGRATION_USER`** (cai no `DB_APP_USER` em dev, sem precisar de role separado).
+
+**Convenção de nomes:** prefixo numérico (`0001_init.sql`, `0002_add_users.sql`) — execução em ordem lexicográfica.
+
+**Comandos:**
+
+```bash
+npm run migrate          # aplica migrações pendentes
+npm run migrate:status   # lista aplicadas vs pendentes; alerta checksum mismatch
+```
+
+> [!warning] Migrações são imutáveis
+> Depois de aplicada, **não edite** o arquivo SQL. Crie um novo arquivo (`0002_alter_users.sql`). O runner aborta com erro se detectar checksum diferente.
+
+Convenções completas (idempotência, operações destrutivas, exemplo, tabela `schema_migrations`) em [`migrations/README.md`](../migrations/README.md).
 
 ### `lock_timeout` agressivo em migrações
 
 DDL precisa de `AccessExclusiveLock`. Se houver transação ativa segurando lock, a migração espera — e enquanto espera, **todas as queries seguintes na tabela enfileiram atrás dela**, derrubando o banco.
 
-Solução: toda migração de DDL deve começar com `SET lock_timeout = '2s'` (mais agressivo que runtime normal) e `SET statement_timeout = '60s'` (DDL pode ser mais longo). Implemente retry com backoff no runner — a migração falha rápido e tenta de novo, em vez de bloquear o banco inteiro.
+Solução: toda migração de DDL deve começar com `SET lock_timeout = '2s'` (mais agressivo que runtime normal) e `SET statement_timeout = '60s'` (DDL pode ser mais longo). O runner já aplica isso automaticamente — não repita no SQL da migração.
 
 ---
 
@@ -181,6 +215,21 @@ Use `pg-cursor` para queries que retornam muitos registros. Carregar tudo em mem
 - **`ok`:** banco acessível (vincule à **liveness probe** — não reinicie pods em pressão).
 - **`degraded`:** pool sob pressão (`waiting > 0`, `idle === 0`, ou latência > 1s). Vincule à **readiness probe** — pare de mandar tráfego antes da saturação total.
 
+### Endpoint no projeto
+
+`GET /api/system/health` (`src/modules/system/system.controller.ts`) retorna **HTTP 200** quando `ok` e **HTTP 503** quando `degraded`/`down` — o status code permite que K8s/load balancers façam a decisão sem inspecionar o body. O body JSON inclui métricas de **ambos** os pools:
+
+```json
+{
+  "status": "degraded",
+  "detail": {
+    "ms": 1234,
+    "write": { "totalCount": 16, "idleCount": 0, "waitingCount": 3 },
+    "read":  { "totalCount": 16, "idleCount": 5, "waitingCount": 0 }
+  }
+}
+```
+
 ### `waitForDatabase` no startup
 
 Se o banco não estiver pronto quando a app subir (deploy, K8s, restart), a app morre. Faça retry com backoff por até ~60s antes de aceitar tráfego. No bootstrap: `waitForDatabase()` → `runMigrations()` → `app.listen()`.
@@ -189,7 +238,7 @@ Se o banco não estiver pronto quando a app subir (deploy, K8s, restart), a app 
 
 ## 12. Observabilidade do pool
 
-Três métricas essenciais para Prometheus/Datadog:
+Três métricas essenciais por pool:
 
 - **`pool.totalCount`:** total de conexões (idle + active + connecting).
 - **`pool.idleCount`:** conexões ociosas disponíveis.
@@ -197,6 +246,23 @@ Três métricas essenciais para Prometheus/Datadog:
 
 > [!danger] `waitingCount > 0` é o alarme de incêndio
 > Requisições estão na fila — o banco vai saturar em seguida.
+
+### Endpoint `/api/system/metrics` no projeto
+
+`getPoolMetrics()` é exposto como JSON simples — sem dependência de Prometheus/Datadog. Qualquer ferramenta gratuita (Grafana Cloud free tier, scraper bash, Uptime Kuma) consegue consumir:
+
+```json
+{
+  "write": { "totalCount": 16, "idleCount": 12, "waitingCount": 0 },
+  "read":  { "totalCount": 16, "idleCount": 14, "waitingCount": 0 }
+}
+```
+
+### Watchdog com alerta Discord
+
+`src/db/watchdog.ts` faz polling periódico (`POOL_WATCHDOG_INTERVAL_MS`, default 10s) e dispara webhook no `DISCORD_WEBHOOK` quando o pool fica saturado por **N ticks seguidos** (`POOL_WATCHDOG_SATURATION_TICKS`, default 3 = 30s). Cooldown configurável evita flood no canal (`POOL_WATCHDOG_COOLDOWN_MS`, default 5min).
+
+Wiring: `startPoolWatchdog()` no boot (`src/index.ts`) e `stopPoolWatchdog()` no `drain()`.
 
 **Alertas sugeridos:**
 
@@ -213,15 +279,44 @@ Três métricas essenciais para Prometheus/Datadog:
 
 Para muitos usuários, separe pools de leitura e escrita: `writePool` apontando ao primário, `readPool` à réplica. Use `application_name` diferentes para identificar tráfego no `pg_stat_activity`.
 
+### Implementação no projeto
+
+Os dois pools são criados em `src/db/pool.ts`. Quando `DB_READ_HOST` não está definido, o `readPool` reutiliza o host do primário — útil em dev/staging onde não há réplica. O `application_name` distinto (`{APP_NAME}_read`) mantém a separação no `pg_stat_activity` e no PgBouncer mesmo nesse cenário.
+
+**Wrapper de queries (`src/db/client.ts`):**
+
+- `query(sql, params)` → escrita. Usa o client da transação atual (ALS) se houver; senão, `writePool`.
+- `readQuery(sql, params)` → SELECT na réplica via `readPool`. **Nunca** chamar dentro de transação.
+
+| Cenário | Função |
+| --- | --- |
+| `SELECT` autocommit sem requisito de consistência forte | `readQuery()` |
+| `INSERT/UPDATE/DELETE` autocommit | `query()` |
+| Qualquer query dentro de `withTransaction` | `query()` (pega o client via ALS) |
+| Leitura após escrita do mesmo usuário com consistência forte | `query()` (força primário) |
+
+**Variáveis de ambiente:**
+
+```env
+DB_READ_HOST=        # vazio → aponta ao primário (dev/staging)
+DB_READ_PORT=        # vazio → usa DB_PORT
+DB_READ_POOL_MAX=    # vazio → usa DB_POOL_MAX
+DB_READ_POOL_MIN=1
+```
+
 ### Replication lag
 
 Réplicas têm atraso (ms a segundos). Não leia de réplica imediatamente após escrever se a consistência importa.
 
 **Três padrões, do mais simples ao mais complexo:**
 
-1. **Primário-only por rota:** marque rotas críticas explicitamente para usar `writePool` mesmo em SELECT. Réplica só onde lag de segundos é aceitável (listas, dashboards).
+1. **Primário-only por rota:** marque rotas críticas explicitamente para usar `query()` (writePool) mesmo em SELECT. Réplica só onde lag de segundos é aceitável (listas, dashboards).
 2. **Sticky window:** após qualquer escrita do usuário, force leituras dele para o primário pelos próximos N segundos (cookie ou Redis).
 3. **LSN-based wait:** capture o LSN no primário após COMMIT (`pg_current_wal_lsn()`), espere a réplica alcançar antes de ler. PG 18+ tem `pg_wal_replay_wait()` nativa; versões anteriores fazem polling em `pg_last_wal_replay_lsn()` com timeout.
+
+### Métricas e health check com dois pools
+
+`getPoolMetrics()` e `healthCheck()` devem retornar `{ write, read }` separadamente — saturação no `readPool` é tão crítica quanto no `writePool` sob alta carga, e Prometheus/Datadog precisam de séries distintas para identificar qual pool degradou primeiro. O `drain()` precisa fechar ambos no shutdown.
 
 ---
 
@@ -377,23 +472,25 @@ Mantenha à mão consultas no `pg_stat_activity` para:
 
 ---
 
-## Estrutura de pastas sugerida
+## Estrutura de pastas (este projeto)
 
 ```
 src/
 ├── db/
-│   ├── pool.ts          # Pool (write + read)
-│   ├── client.ts        # query() com retry + log sanitizado
-│   ├── transaction.ts   # withTransaction com cleanup correto
+│   ├── pool.ts          # writePool + readPool, drainPool fecha ambos
+│   ├── client.ts        # query() + readQuery() com retry e log sanitizado
+│   ├── transaction.ts   # withTransaction com cleanup correto + ALS
 │   ├── health.ts        # healthCheck em camadas + waitForDatabase
-│   ├── metrics.ts       # getPoolMetrics
-│   └── stream.ts        # streamRows com cursor
-├── schemas/             # Zod
-├── repositories/        # acesso ao banco
-├── routes/              # handlers HTTP
-└── server.ts            # bootstrap + graceful shutdown
-migrations/              # SQL (rodado pelo migration_user)
-scripts/migrate.ts       # runner com lock_timeout agressivo
+│   ├── metrics.ts       # getPoolMetrics retorna { write, read }
+│   ├── stream.ts        # streamRows com pg-cursor
+│   └── watchdog.ts      # alerta Discord em saturação do pool
+├── modules/
+│   └── system/          # GET /api/system/health e /api/system/metrics
+└── index.ts             # bootstrap + graceful shutdown + startPoolWatchdog
+migrations/              # SQL versionado (prefixo numérico 0001_*.sql)
+scripts/
+├── migrate.ts           # runner com lock_timeout='2s' + checksum SHA-256
+└── tsconfig.json        # type-check isolado do script
 .env / .env.example
 ```
 

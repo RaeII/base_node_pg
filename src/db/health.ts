@@ -1,4 +1,4 @@
-import { writePool } from "@/db/pool";
+import { writePool, readPool } from "@/db/pool";
 import logger from "@/shared/utils/logger";
 
 export type HealthStatus = "ok" | "degraded" | "down";
@@ -10,20 +10,27 @@ export interface HealthCheckResult {
 
 /**
  * Health check em camadas:
- * - `ok`     → vincule à **liveness probe** (não reinicie pods em pressão)
- * - `degraded` → vincule à **readiness probe** (pare de mandar tráfego antes da saturação)
- * - `down`   → DB inacessível
+ * - `ok`       → vincule à liveness probe (não reinicie pods em pressão)
+ * - `degraded` → vincule à readiness probe (pare de mandar tráfego antes da saturação)
+ * - `down`     → DB inacessível
  */
 export async function healthCheck(): Promise<HealthCheckResult> {
     try {
         const t0 = Date.now();
         await writePool.query("SELECT 1");
         const ms = Date.now() - t0;
-        const { waitingCount, idleCount, totalCount } = writePool;
-        const degraded = waitingCount > 0 || idleCount === 0 || ms > 1_000;
+
+        const write = { waitingCount: writePool.waitingCount, idleCount: writePool.idleCount, totalCount: writePool.totalCount };
+        const read  = { waitingCount: readPool.waitingCount,  idleCount: readPool.idleCount,  totalCount: readPool.totalCount  };
+
+        const degraded =
+            write.waitingCount > 0 || write.idleCount === 0 ||
+            read.waitingCount  > 0 || read.idleCount  === 0 ||
+            ms > 1_000;
+
         return {
             status: degraded ? "degraded" : "ok",
-            detail: { ms, waitingCount, idleCount, totalCount },
+            detail: { ms, write, read },
         };
     } catch (err) {
         return {

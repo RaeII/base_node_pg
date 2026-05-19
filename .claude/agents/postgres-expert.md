@@ -116,6 +116,15 @@ Validate with Zod before hitting the database. **Always use `.max()` on strings*
 
 Always register `pool.on('error')` — without it, any error on an idle client crashes the process.
 
+### Defaults for High Concurrency (≥10k concurrent users)
+
+| Parameter | Value | Why |
+| --- | --- | --- |
+| `connectionTimeoutMillis` | **2 s** (not 5 s) | 5 s in the queue under spikes causes thundering herd; fail-fast triggers circuit breaker first |
+| `idle_in_transaction_session_timeout` | **15 s** (not 30 s) | Tx idle for 30 s holds locks and cascades failures; 15 s keeps margin while reducing damage |
+| `lock_timeout` | 2–3 s | Can drop to 1–2 s under high contention |
+| `maxLifetimeSeconds` | 1800 | Recycle connections before balancers (Aurora, PgBouncer) cut them |
+
 ### Pool Sizing Formula
 
 Use a budget approach, not `cores × 2`:
@@ -311,13 +320,31 @@ Same cleanup rule as transactions: `client.release(true)` on error paths, includ
 
 For heavy read traffic, separate write and read pools: `writePool` pointing to the primary, `readPool` to the replica. Use distinct `application_name` values to identify traffic in `pg_stat_activity`.
 
+### Project Implementation (Already in Place)
+
+Both pools are created in `src/db/pool.ts`. When `DB_READ_HOST` is not set, `readPool` reuses the primary host — useful in dev/staging where no replica exists. The distinct `application_name` (`{APP_NAME}_read`) keeps the separation in `pg_stat_activity` and PgBouncer even then.
+
+**Query wrappers in `src/db/client.ts`:**
+
+- `query(sql, params)` → writes. Uses the current transaction client via ALS if any; otherwise `writePool`.
+- `readQuery(sql, params)` → SELECT on the replica via `readPool`. **Never** call inside a transaction.
+
+| Scenario | Function |
+| --- | --- |
+| Autocommit `SELECT` without strong consistency requirement | `readQuery()` |
+| Autocommit `INSERT/UPDATE/DELETE` | `query()` |
+| Any query inside `withTransaction` | `query()` (picks the client via ALS) |
+| Read-after-write for the same user requiring strong consistency | `query()` (forces primary) |
+
+`getPoolMetrics()`, `healthCheck()` and `drain()` all operate on **both** pools — read pool saturation is as critical as write pool under heavy load. Prometheus/Datadog needs separate series to identify which pool degraded first.
+
 ### Replication Lag
 
 Replicas have delay (ms to seconds). Do not read from a replica immediately after a write if consistency matters.
 
 Three patterns (simplest to most complex):
 
-1. **Primary-only by route:** mark critical routes to use `writePool` even for SELECT. Use replica only where seconds of lag is acceptable.
+1. **Primary-only by route:** mark critical routes to use `query()` (writePool) even for SELECT. Use replica only where seconds of lag is acceptable.
 2. **Sticky window:** after any user write, force their reads to the primary for the next N seconds (cookie or Redis).
 3. **LSN-based wait:** capture the LSN on the primary after COMMIT (`pg_current_wal_lsn()`), wait for the replica to catch up before reading.
 

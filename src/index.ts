@@ -5,12 +5,15 @@ import { registerControllers } from "@/shared/core/registerControllers";
 import { setupSwagger } from "@/shared/core/swagger/swagger.setup";
 import AuthController from "@/modules/auth/auth.controller";
 import UserController from "@/modules/user/user.controller";
+import SystemController from "@/modules/system/system.controller";
 import { drainPool } from "@/db/pool";
+import { startPoolWatchdog, stopPoolWatchdog } from "@/db/watchdog";
 import logger from "@/shared/utils/logger";
 
 const controllers = [
 	AuthController,
 	UserController,
+	SystemController,
 ];
 
 async function startServer() {
@@ -48,12 +51,16 @@ async function startServer() {
 		process.exit(1);
 	});
 
+	// Monitor periódico dos pools com alerta Discord em saturação
+	startPoolWatchdog();
+
 	const closeHttp = () =>
 		new Promise<void>((resolve) => server.close(() => resolve()));
 
 	// Graceful shutdown: separar `drain` (só fecha) de `gracefulShutdown` (decide exit code).
 	// Importante para que `uncaughtException` saia com exit(1) — orquestrador K8s precisa ver o crash.
 	const drain = async (): Promise<void> => {
+		stopPoolWatchdog();
 		await closeHttp();
 		await drainPool(10_000);
 	};

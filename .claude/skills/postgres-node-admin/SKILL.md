@@ -48,43 +48,68 @@ scripts/migrate.ts   # runner com lock_timeout agressivo
 
 ## Pool (pool.ts)
 
+Dois pools sempre — `writePool` (primário) e `readPool` (réplica). Quando `DB_READ_HOST` não está
+definido, `readPool` reusa o host do primário (ideal em dev/staging) mas mantém `application_name`
+distinto para separar tráfego no `pg_stat_activity` e no PgBouncer.
+
 ```typescript
-import { Pool } from 'pg';
+import { Pool, type PoolConfig } from 'pg';
 
-export const writePool = new Pool({
-  host: process.env.DB_HOST,
-  port: Number(process.env.DB_PORT),
-  database: process.env.DB_NAME,
-  user: process.env.APP_USER,
-  password: process.env.APP_PASSWORD,
-  ssl: {
-    rejectUnauthorized: true,
-    ca: process.env.DB_SSL_CA,
-    // checkServerIdentity: customFn  ← adicionar para verify-full completo
-  },
-  max: 16,                              // calcular pela fórmula orçamentária (ver pool-config.md)
-  min: 2,
-  idleTimeoutMillis: 10_000,
-  connectionTimeoutMillis: 5_000,
-  maxLifetimeSeconds: 1_800,            // NUNCA deixar em 0
-  application_name: process.env.APP_NAME,
+const baseConfig: PoolConfig = {
+  host: env.DB_HOST,
+  port: env.DB_PORT,
+  database: env.DB_NAME,
+  user: env.DB_APP_USER,
+  password: env.DB_APP_PASSWORD,
+  ssl: env.DB_SSL ? { rejectUnauthorized: true, ca: env.DB_SSL_CA } : false,
+  max: env.DB_POOL_MAX,                              // 16 — fórmula orçamentária (ver pool-config.md)
+  min: env.DB_POOL_MIN,                              // 2
+  idleTimeoutMillis: env.DB_IDLE_TIMEOUT_MS,         // 10_000
+  connectionTimeoutMillis: env.DB_CONNECTION_TIMEOUT_MS, // 2_000 — fail-fast sob alta carga
+  maxLifetimeSeconds: env.DB_MAX_LIFETIME_SECONDS,   // 1_800 — NUNCA deixar em 0
+  application_name: env.APP_NAME,
   keepAlive: true,
-  options: '-c timezone=America/Sao_Paulo', // startup packet — não usar SET no evento connect
-  // Timeouts via PoolConfig (lock_timeout NUNCA vai no postgresql.conf)
-  statement_timeout: 10_000,
-  query_timeout: 12_000,               // > statement_timeout
-  lock_timeout: 3_000,
-  idle_in_transaction_session_timeout: 30_000,
-});
+  options: `-c timezone=${env.DB_TIMEZONE}`,         // startup packet, não SET no evento connect
+  statement_timeout: env.DB_STATEMENT_TIMEOUT_MS,    // 10_000
+  query_timeout: env.DB_QUERY_TIMEOUT_MS,            // 12_000 (> statement_timeout)
+  lock_timeout: env.DB_LOCK_TIMEOUT_MS,              // 3_000
+  idle_in_transaction_session_timeout: env.DB_IDLE_TX_TIMEOUT_MS, // 15_000 — tx ociosa segura locks
+};
 
-writePool.on('error', (err) => logger.error('Pool idle client error', { err }));
+export const writePool = new Pool(baseConfig);
+writePool.on('error', (err) => logger.error('Write pool idle client error', { err }));
+
+export const readPool = new Pool({
+  ...baseConfig,
+  host: env.DB_READ_HOST || env.DB_HOST,
+  port: env.DB_READ_PORT || env.DB_PORT,
+  max: env.DB_READ_POOL_MAX || env.DB_POOL_MAX,
+  min: env.DB_READ_POOL_MIN,
+  application_name: `${env.APP_NAME}_read`,
+});
+readPool.on('error', (err) => logger.error('Read pool idle client error', { err }));
+
+export const drainPool = async (timeoutMs = 10_000): Promise<void> => {
+  await Promise.race([
+    Promise.all([writePool.end(), readPool.end()]),
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Pool drain timeout')), timeoutMs)),
+  ]);
+};
 ```
 
-Para **read pool**, **dimensionamento** e **PgBouncer** → `references/pool-config.md`
+> **Defaults atualizados para alta concorrência (≥10k usuários):**
+> `DB_CONNECTION_TIMEOUT_MS=2000` (era 5000 — fail-fast evita thundering herd) e
+> `DB_IDLE_TX_TIMEOUT_MS=15000` (era 30000 — tx ociosa segura locks e causa efeito cascata).
+
+Para **dimensionamento orçamentário**, **replication lag** e **PgBouncer** → `references/pool-config.md`
 
 ---
 
-## Query Wrapper (client.ts)
+## Query Wrappers (client.ts)
+
+Duas funções: `query()` para escritas (e leituras dentro de transação via ALS) e `readQuery()`
+para SELECTs autocommit que devem ir à réplica.
 
 ```typescript
 const SLOW_QUERY_MS = 500;
@@ -92,26 +117,33 @@ const MAX_RETRIES = 3;
 // Transient errors safe to retry (autocommit idempotent queries only)
 const RETRYABLE = new Set(['08006','08001','08004','57P03','ECONNRESET','ECONNREFUSED','EPIPE']);
 
-export async function query<T>(sql: string, params?: unknown[]): Promise<QueryResult<T>> {
-  let attempt = 0;
-  while (true) {
-    const t0 = Date.now();
-    try {
-      const result = await writePool.query<T>(sql, params);
-      const ms = Date.now() - t0;
-      if (ms > SLOW_QUERY_MS) logger.warn('Slow query', { sql, ms, paramCount: params?.length });
-      return result;
-    } catch (err: any) {
-      const retryable = RETRYABLE.has(err.code) || RETRYABLE.has(err.errno);
-      if (!retryable || ++attempt >= MAX_RETRIES) throw err;
-      await sleep(Math.min(100 * 2 ** attempt + Math.random() * 100, 2_000));
-    }
-  }
+/** Escrita (ou leitura dentro de tx). Usa o client da tx (ALS) se houver. */
+export async function query<T>(sql: string, params?: unknown[], opts: QueryOptions = {}) {
+  const executor = opts.client ?? getTxClient() ?? writePool;
+  const allowRetry = !opts.noRetry && !opts.client && !getTxClient();
+  // … loop com retry exponencial + jitter
+}
+
+/** SELECT na réplica. Nunca usar dentro de transação — use query() com o client da tx. */
+export async function readQuery<T>(sql: string, params?: unknown[]) {
+  // mesma lógica, mas executor = readPool, sem ALS, retry sempre habilitado
 }
 ```
 
+**Decisão rápida — qual usar:**
+
+| Cenário | Função |
+|---|---|
+| `SELECT` autocommit fora de transação | `readQuery()` → réplica |
+| `INSERT/UPDATE/DELETE` autocommit | `query()` → primário |
+| Qualquer query dentro de `withTransaction` | `query()` (pega o client via ALS) |
+| Leitura após escrita do mesmo usuário com consistência forte | `query()` (força primário) |
+
 > Retry só em queries **idempotentes**: `UPDATE … WHERE id`, `DELETE`, `INSERT … ON CONFLICT DO NOTHING`.
-> Para `INSERT` simples ou contadores → desabilitar retry.
+> Para `INSERT` simples ou contadores → `opts.noRetry = true`.
+
+> **Replication lag:** réplicas atrasam ms a segundos. Não use `readQuery()` imediatamente após
+> uma escrita se a consistência importar — veja padrão **sticky window** em `references/pool-config.md`.
 
 Para **listas dinâmicas** (`ANY($1::int[])`), **identificadores dinâmicos** e **streaming** → `references/query-patterns.md`
 
@@ -216,15 +248,21 @@ async function runMigration(client: PoolClient, sql: string) {
 
 ## Health Check & Startup (health.ts)
 
+Monitorar **ambos** os pools — saturação no readPool é tão crítica quanto no writePool sob alta carga.
+
 ```typescript
 export async function healthCheck() {
   try {
     const t0 = Date.now();
     await writePool.query('SELECT 1');
     const ms = Date.now() - t0;
-    const { waitingCount, idleCount, totalCount } = writePool;
-    const degraded = waitingCount > 0 || idleCount === 0 || ms > 1_000;
-    return { status: degraded ? 'degraded' : 'ok', detail: { ms, waitingCount, idleCount, totalCount } };
+    const write = { waitingCount: writePool.waitingCount, idleCount: writePool.idleCount, totalCount: writePool.totalCount };
+    const read  = { waitingCount: readPool.waitingCount,  idleCount: readPool.idleCount,  totalCount: readPool.totalCount  };
+    const degraded =
+      write.waitingCount > 0 || write.idleCount === 0 ||
+      read.waitingCount  > 0 || read.idleCount  === 0 ||
+      ms > 1_000;
+    return { status: degraded ? 'degraded' : 'ok', detail: { ms, write, read } };
   } catch (err) {
     return { status: 'down', detail: { error: String(err) } };
   }
@@ -243,6 +281,9 @@ export async function waitForDatabase(retries = 10): Promise<void> {
 - **`ok`** → liveness probe (não reiniciar em pressão)
 - **`degraded`** → readiness probe (parar tráfego antes da saturação)
 
+`getPoolMetrics()` deve retornar `{ write, read }` — Prometheus/Datadog precisam de séries
+separadas para detectar qual pool saturou primeiro.
+
 ---
 
 ## Graceful Shutdown
@@ -250,7 +291,7 @@ export async function waitForDatabase(retries = 10): Promise<void> {
 ```typescript
 export async function drain(): Promise<void> {
   await Promise.race([
-    writePool.end(),
+    Promise.all([writePool.end(), readPool.end()]),  // fechar ambos os pools
     sleep(10_000).then(() => { throw new Error('Pool drain timeout'); }),
   ]);
 }

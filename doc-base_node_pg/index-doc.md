@@ -41,6 +41,7 @@ Boilerplate de API REST com **Node.js 20 + Express 5 + TypeScript**, com roteame
 ### Banco de Dados
 
 - [[postgres-config|Guia PostgreSQL]] — pool, transações, segurança, PgBouncer, graceful shutdown
+- [`migrations/README.md`](../migrations/README.md) — convenções de migrations SQL versionadas
 
 ### Módulos
 
@@ -65,14 +66,28 @@ Boilerplate de API REST com **Node.js 20 + Express 5 + TypeScript**, com roteame
 | `POST` | `/api/user/` | — | Criar usuário |
 | `PUT` | `/api/user/:id` | — | Atualizar usuário |
 | `DELETE` | `/api/user/:id` | — | Desativar (soft delete) |
+| `GET` | `/api/system/health` | — | Health check em camadas (200/503 para K8s probes) |
+| `GET` | `/api/system/metrics` | — | Pool stats em JSON (`write` + `read`) |
 | `GET` | `/api-docs` | — | Swagger UI |
+
+---
+
+## Observabilidade (sem custo)
+
+- **`/api/system/health`** → liveness/readiness probes (HTTP 200 = ok, 503 = degradado/down)
+- **`/api/system/metrics`** → JSON consumível por qualquer ferramenta gratuita (Grafana Cloud free, Uptime Kuma, scraper bash)
+- **Watchdog Discord** → alerta automático via `DISCORD_WEBHOOK` quando o pool satura (`src/db/watchdog.ts`)
+
+Detalhes em [[postgres-config|Guia PostgreSQL]] §11–12.
 
 ---
 
 ## Comandos
 
 ```bash
-bun dev          # desenvolvimento com hot-reload (nodemon)
-bun run build    # compila TypeScript → dist/
-bun start        # produção (NODE_ENV=production)
+bun dev                  # desenvolvimento com hot-reload (nodemon)
+bun run build            # compila TypeScript → dist/
+bun start                # produção (NODE_ENV=production)
+npm run migrate          # aplica migrations pendentes (lock_timeout='2s' agressivo)
+npm run migrate:status   # lista aplicadas vs pendentes
 ```

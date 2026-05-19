@@ -1,13 +1,18 @@
-import { writePool } from "@/db/pool";
+import { writePool, readPool } from "@/db/pool";
 
-export interface PoolMetrics {
+export interface SinglePoolMetrics {
     totalCount: number;
     idleCount: number;
     waitingCount: number;
 }
 
+export interface PoolMetrics {
+    write: SinglePoolMetrics;
+    read: SinglePoolMetrics;
+}
+
 /**
- * Métricas do pool — exporte para Prometheus/Datadog.
+ * Métricas de ambos os pools — exporte para Prometheus/Datadog.
  *
  * - `waitingCount > 0` por 30s+ → alarme P1
  * - `idle/total < 0.1` sustentado → subdimensionado
@@ -15,8 +20,15 @@ export interface PoolMetrics {
  */
 export function getPoolMetrics(): PoolMetrics {
     return {
-        totalCount: writePool.totalCount,
-        idleCount: writePool.idleCount,
-        waitingCount: writePool.waitingCount,
+        write: {
+            totalCount: writePool.totalCount,
+            idleCount: writePool.idleCount,
+            waitingCount: writePool.waitingCount,
+        },
+        read: {
+            totalCount: readPool.totalCount,
+            idleCount: readPool.idleCount,
+            waitingCount: readPool.waitingCount,
+        },
     };
 }

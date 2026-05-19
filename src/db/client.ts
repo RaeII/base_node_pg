@@ -1,5 +1,5 @@
 import type { PoolClient, QueryResult, QueryResultRow } from "pg";
-import { writePool } from "@/db/pool";
+import { writePool, readPool } from "@/db/pool";
 import { getTxClient } from "@/db/transaction";
 import logger from "@/shared/utils/logger";
 
@@ -29,24 +29,13 @@ const isRetryable = (err: any): boolean => {
 };
 
 export interface QueryOptions {
-    /**
-     * Cliente explícito (transação). Se omitido, tenta o ALS; depois cai no pool.
-     */
+    /** Cliente explícito (transação). Se omitido, tenta o ALS; depois cai no pool. */
     client?: PoolClient;
-    /**
-     * Desabilita retry — usar em queries não-idempotentes (INSERT simples, UPDATE com contador).
-     */
+    /** Desabilita retry — usar em queries não-idempotentes (INSERT simples, UPDATE com contador). */
     noRetry?: boolean;
 }
 
-/**
- * Executa uma query parametrizada.
- *
- * - Usa o cliente da transação atual (ALS), se houver.
- * - Caso contrário, usa o `writePool` (autocommit).
- * - Aplica retry com backoff exponencial + jitter para erros transientes.
- * - NUNCA loga `params` — pode conter senhas/tokens/CPF.
- */
+/** Executa query de escrita (ou leitura dentro de transação) via writePool. */
 export async function query<T extends QueryResultRow = QueryResultRow>(
     sql: string,
     params?: unknown[],
@@ -70,6 +59,41 @@ export async function query<T extends QueryResultRow = QueryResultRow>(
         } catch (err: any) {
             if (!allowRetry || !isRetryable(err) || ++attempt >= MAX_RETRIES) {
                 logger.error("Query failed", {
+                    sql,
+                    paramCount: params?.length ?? 0,
+                    code: err?.code,
+                    message: err?.message,
+                });
+                throw err;
+            }
+            const backoff = Math.min(100 * 2 ** attempt + Math.random() * 100, 2_000);
+            await sleep(backoff);
+        }
+    }
+}
+
+/**
+ * Executa SELECT via readPool (réplica de leitura).
+ * NÃO usar dentro de transações — use `query()` com o client da tx.
+ * Retry automático para erros transientes com backoff exponencial + jitter.
+ */
+export async function readQuery<T extends QueryResultRow = QueryResultRow>(
+    sql: string,
+    params?: unknown[],
+): Promise<QueryResult<T>> {
+    let attempt = 0;
+    while (true) {
+        const t0 = Date.now();
+        try {
+            const result = await readPool.query<T>(sql, params as any[]);
+            const ms = Date.now() - t0;
+            if (ms > SLOW_QUERY_MS) {
+                logger.warn("Slow read query", { sql, ms, paramCount: params?.length ?? 0 });
+            }
+            return result;
+        } catch (err: any) {
+            if (!isRetryable(err) || ++attempt >= MAX_RETRIES) {
+                logger.error("Read query failed", {
                     sql,
                     paramCount: params?.length ?? 0,
                     code: err?.code,
