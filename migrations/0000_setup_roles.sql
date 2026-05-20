@@ -17,7 +17,10 @@ BEGIN
 END $$;
 
 -- 2. Permissões básicas para app_user
-GRANT CONNECT ON DATABASE CURRENT_DATABASE() TO app_user;
+DO $$
+BEGIN
+    EXECUTE format('GRANT CONNECT ON DATABASE %I TO app_user', current_database());
+END $$;
 GRANT USAGE   ON SCHEMA public TO app_user;
 GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES    IN SCHEMA public TO app_user;
 GRANT USAGE, SELECT                   ON ALL SEQUENCES IN SCHEMA public TO app_user;
