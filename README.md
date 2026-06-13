@@ -56,13 +56,13 @@ git commit -m "feat: init"
 gh repo create meu-projeto --private --source=. --push
 
 # 5. Instalar dependências
-yarn install
+bun install
 
 # 6. Configurar variáveis de ambiente
 cp .env.example .env
 
 # 7. Rodar em desenvolvimento
-yarn dev
+bun dev
 ```
 
 > 💡 **Sobre o `gh repo create`:**
