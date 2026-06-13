@@ -48,7 +48,7 @@ cd meu-projeto
 rm -rf .git
 
 # 3. Inicializar um novo repositório git
-git init
+git init -b main
 git add .
 git commit -m "feat: init"
 
