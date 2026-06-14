@@ -60,8 +60,8 @@ export default class UserService {
       throwUser("Credenciais inválidas", 401);
     }
 
-    const ok = bcrypt.compare(password, row.password);
-    if (!row.password || !ok) {
+    const ok = row.password ? await bcrypt.compare(password, row.password) : false;
+    if (!ok) {
       throwUser("Credenciais inválidas", 401);
     }
 

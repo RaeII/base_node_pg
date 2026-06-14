@@ -7,13 +7,17 @@ import {
   ErrorRequestHandler,
 } from "express";
 import cors from "cors";
+import cookieParser from "cookie-parser";
 
 /**
  * Registra os middlewares que devem ser executados ANTES das rotas.
- * (json parser, cors, async local storage, etc.)
+ * (json parser, cookie parser, cors, async local storage, etc.)
  */
 export function loadPreRouteMiddlewares(app: Application) {
   app.use(json({ limit: '10mb' }));
+
+  // Necessário para ler o cookie httpOnly `token_access` no jwtMiddleware.
+  app.use(cookieParser());
 
   const options: cors.CorsOptions = {
     credentials: true,

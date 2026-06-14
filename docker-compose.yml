@@ -1,16 +1,16 @@
-version: '3.8'
+services:
+  api:
+    build: .
+    image: base-node-pg
+    container_name: base-node-pg
+    env_file:
+      - .env
+    ports:
+      - "${PORT}:${PORT}"
+    networks:
+      - boring
+    restart: unless-stopped
 
 networks:
   boring:
     external: true
-
-services:
-  discord-alert:
-    build: .
-    image: discord-alert
-    container_name: discord-alert
-    networks:
-      - boring
-    env_file:
-      - .env
-    restart: unless-stopped 

@@ -13,7 +13,7 @@ version: 1.0.0
 # PostgreSQL Admin — Node.js + TypeScript (sem ORM)
 
 Stack: **Node.js ≥ 20 LTS · `pg` ≥ 8.13 · TypeScript strict · sem ORM**
-Documentação completa: `doc-base_node_pg/postgres-config.md`
+Documentação completa: `doc/postgres-config.md`
 
 ---
 

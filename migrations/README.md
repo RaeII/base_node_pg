@@ -93,4 +93,4 @@ SELECT name, applied_at FROM schema_migrations ORDER BY id;
 
 Em produção, configure `DB_MIGRATION_USER` separado (com privilégios de DDL) — diferente do `DB_APP_USER` (só DML). Em dev, se `DB_MIGRATION_USER` estiver vazio, o runner cai no `DB_APP_USER`.
 
-Mais detalhes: [`doc-base_node_pg/postgres-config.md §8–9`](../doc-base_node_pg/postgres-config.md).
+Mais detalhes: [`doc/postgres-config.md §8–9`](../doc/postgres-config.md).

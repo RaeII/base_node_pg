@@ -40,8 +40,8 @@ class AuthController extends Controller {
     try {
       const { name }: { name: string } = req.body;
 
-      const jwtSecret = process.env.JWT_SECRET || "default_secret_key";
-      const expiresIn = 60 * 60 * 24 * 30; // 30 dias
+      const jwtSecret = env.JWT_SECRET as string; // garantido no boot (loaders)
+      const expiresIn = 60 * 60 * 24 * 30; // 30 dias (em segundos)
 
       const payload = {
         name,
@@ -74,8 +74,8 @@ class AuthController extends Controller {
         password: data.password,
       });
 
-      const jwtSecret = env.JWT_SECRET || "default_secret_key";
-      const expiresIn = 60 * 60 * 24 * 30; // 30 dias
+      const jwtSecret = env.JWT_SECRET as string; // garantido no boot (loaders)
+      const expiresIn = 60 * 60 * 24 * 30; // 30 dias (em segundos)
 
       const payload = {
         sub: String(user.id),
@@ -91,7 +91,7 @@ class AuthController extends Controller {
         httpOnly: true,
         secure: env.isProduction,
         sameSite: env.isProduction ? "none" : "lax",
-        maxAge: expiresIn,
+        maxAge: expiresIn * 1000, // cookie maxAge é em milissegundos
         path: "/",
         domain: env.isProduction ? ".example.com" : "localhost",
       });

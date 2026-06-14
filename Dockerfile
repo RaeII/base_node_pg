@@ -1,13 +1,17 @@
-FROM node:20-alpine
+FROM oven/bun:1-alpine
 
 WORKDIR /app
 
-COPY package.json yarn.lock ./
-RUN yarn install --frozen-lockfile
+# Instala dependências usando o lockfile (cache de camada)
+COPY package.json bun.lock ./
+RUN bun install --frozen-lockfile
 
+# Copia o código e compila
 COPY . .
-RUN yarn build
+RUN bun run build
 
 RUN mkdir -p logs
 
-CMD ["yarn", "start"] 
+ENV NODE_ENV=production
+
+CMD ["bun", "start"]

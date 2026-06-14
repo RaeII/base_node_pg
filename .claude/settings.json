@@ -1,7 +1,4 @@
 {
-  "enabledPlugins": {
-    "obsidian@obsidian-skills": true
-  },
   "hooks": {
     "PostToolUse": [
       {
@@ -25,5 +22,9 @@
         ]
       }
     ]
+  },
+  "enabledPlugins": {
+    "obsidian@obsidian-skills": true,
+    "andrej-karpathy-skills@karpathy-skills": true
   }
 }
