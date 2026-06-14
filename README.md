@@ -41,7 +41,7 @@ A ideia é simples: ao invés de configurar tudo do zero a cada novo projeto, vo
 
 ```bash
 # 1. Clonar o template em uma nova pasta
-git clone git@github.com:RaeII/base_node.git meu-projeto
+git clone git@github.com:RaeII/base_node_pg.git meu-projeto
 cd meu-projeto
 
 # 2. Remover o vínculo com o repositório original
