@@ -58,9 +58,6 @@ bun install
 # 4. Configurar variáveis de ambiente
 cp .env.example .env      # preencha PORT, JWT_SECRET, DB_* etc.
 
-# 5. Aplicar as migrations
-bun run scripts/migrate.ts
-
 # 6. Rodar em desenvolvimento (hot-reload)
 bun dev
 ```
