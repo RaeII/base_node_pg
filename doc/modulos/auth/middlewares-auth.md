@@ -19,9 +19,12 @@ Arquivo auxiliar do [[auth|Módulo Auth]]. São middlewares globais reutilizados
 Valida o cookie `token_access` em rotas protegidas.
 
 - Lê `req.cookies['token_access']`.
-- Verifica a assinatura com `JWT_SECRET`.
+- Verifica assinatura com `JWT_SECRET` **restrita a `algorithms: ["HS256"]` + `issuer: APP_NAME`** — tokens de outra app (mesmo com o mesmo secret) ou com algoritmo trocado são rejeitados.
 - Coloca o payload decodificado em `res.locals.jwt`.
 - Responde `403` se inválido/expirado, `401` se ausente.
+
+> [!note] Tokens de usuário E de serviço passam aqui
+> Qualquer JWT válido (claim `type: "user"` ou `"service"`) é aceito. Se a rota é exclusiva de usuários, cheque `res.locals.jwt.type === "user"` no handler. Ver [[seguranca#JWT]].
 
 São **instâncias de classe** — passe com `.bind`:
 
@@ -30,7 +33,7 @@ São **instâncias de classe** — passe com `.bind`:
 ```
 
 > [!warning] Depende de `AUTHORIZATION`
-> Toda a verificação só roda quando `env.AUTHORIZATION` é truthy (`AUTHORIZATION=1`). Com `0`, o middleware chama `next()` direto — sem proteção. Use apenas em dev.
+> Toda a verificação só roda quando `env.AUTHORIZATION` é truthy (`AUTHORIZATION=1`). Com `0`, o middleware chama `next()` direto — sem proteção. Use apenas em dev: **em produção o boot falha se `AUTHORIZATION != 1`** (fail-closed, ver [[seguranca]]).
 
 > [!note] Cookies já são parseados
 > O middleware lê `req.cookies` — habilitado pelo `cookie-parser` registrado nos loaders pré-rota (ver [[ciclo-de-vida]]). Sem ele `req.cookies` seria `undefined`.
@@ -42,7 +45,7 @@ São **instâncias de classe** — passe com `.bind`:
 Verifica se o usuário autenticado é administrador. Deve vir **depois** de `jwtMiddleware`.
 
 - Se `AUTHORIZATION` não está habilitado → `next()` (não bloqueia).
-- Lê `res.locals.jwt.admin` e aceita como admin: `true`, `1`, `"true"`, `"1"`, `"admin"`, `"yes"`.
+- Lê `res.locals.jwt.admin` e só aceita **`admin === true` estrito** (boolean assinado pela própria app no login). Tokens de serviço não carregam `admin` → sempre `403` aqui.
 - Caso contrário responde `403`.
 
 ```typescript

@@ -1,6 +1,10 @@
 import Database from "@/shared/infra/database/Database";
 import { getPagination } from "@/shared/utils/pagination";
-import type { CreateUserDbInput, DbUserRow, UpdateUserDbInput } from "./schema/user.schema";
+import type { CreateUserDbInput, DbUserAuthRow, DbUserRow, UpdateUserDbInput } from "./schema/user.schema";
+
+// Projeção explícita SEM a coluna password — o hash só sai do banco no fluxo
+// de autenticação (findByUsernameOrEmail). Nunca use SELECT * nesta tabela.
+const USER_COLUMNS = `id, username, email, is_active, is_admin, last_login_at, created_at, updated_at`;
 
 export default class UserDatabase extends Database {
 
@@ -13,10 +17,10 @@ export default class UserDatabase extends Database {
     const { limit, offset } = getPagination();
 
     const result = await this.query<DbUserRow & { _total: string }>(
-      `SELECT u.*, COUNT(*) OVER () AS _total
-         FROM "user" u
-        WHERE u.is_active = TRUE
-        ORDER BY u.id ASC
+      `SELECT ${USER_COLUMNS}, COUNT(*) OVER () AS _total
+         FROM "user"
+        WHERE is_active = TRUE
+        ORDER BY id ASC
         LIMIT $1 OFFSET $2`,
       [limit, offset]
     );
@@ -30,7 +34,7 @@ export default class UserDatabase extends Database {
 
   async findByUsername(username: string): Promise<DbUserRow | null> {
     const result = await this.query<DbUserRow>(
-      `SELECT * FROM "user" WHERE username = $1 LIMIT 1`,
+      `SELECT ${USER_COLUMNS} FROM "user" WHERE username = $1 LIMIT 1`,
       [username]
     );
     return result.rows[0] ?? null;
@@ -38,15 +42,16 @@ export default class UserDatabase extends Database {
 
   async findByEmail(email: string): Promise<DbUserRow | null> {
     const result = await this.query<DbUserRow>(
-      `SELECT * FROM "user" WHERE email = $1 LIMIT 1`,
+      `SELECT ${USER_COLUMNS} FROM "user" WHERE email = $1 LIMIT 1`,
       [email]
     );
     return result.rows[0] ?? null;
   }
 
-  async findByUsernameOrEmail(identifier: string): Promise<DbUserRow | null> {
-    const result = await this.query<DbUserRow>(
-      `SELECT * FROM "user" WHERE username = $1 OR email = $1 LIMIT 1`,
+  /** Único método que retorna o hash da senha — uso exclusivo do authenticate. */
+  async findByUsernameOrEmail(identifier: string): Promise<DbUserAuthRow | null> {
+    const result = await this.query<DbUserAuthRow>(
+      `SELECT ${USER_COLUMNS}, password FROM "user" WHERE username = $1 OR email = $1 LIMIT 1`,
       [identifier]
     );
     return result.rows[0] ?? null;
@@ -54,7 +59,7 @@ export default class UserDatabase extends Database {
 
   async findById(id: number): Promise<DbUserRow | null> {
     const result = await this.query<DbUserRow>(
-      `SELECT * FROM "user" WHERE id = $1 LIMIT 1`,
+      `SELECT ${USER_COLUMNS} FROM "user" WHERE id = $1 LIMIT 1`,
       [id]
     );
     return result.rows[0] ?? null;

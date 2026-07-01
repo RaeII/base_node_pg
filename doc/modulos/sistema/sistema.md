@@ -41,6 +41,9 @@ O status code permite que K8s/load balancers decidam sem inspecionar o body:
 
 Critério de `degraded`: `waitingCount > 0`, `idleCount === 0` (em qualquer pool) ou latência do `SELECT 1` > 1s.
 
+> [!note] `down` não expõe o erro do driver
+> Quando o banco está inacessível, a resposta é `{ "status": "down", "detail": { "error": "database unreachable" } }`. A mensagem crua do driver (pode conter host/usuário do banco) vai apenas para o log — ver [[seguranca]].
+
 ---
 
 ## GET `/api/system/metrics`

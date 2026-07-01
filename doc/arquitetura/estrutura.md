@@ -51,11 +51,12 @@ base_node_pg/
 │       ├── infra/
 │       │   └── database/Database.ts      # Classe base de repositórios (delega p/ db/client.ts)
 │       ├── loaders/
-│       │   ├── index.ts                  # Orquestra bootstrap (waitForDatabase, middlewares)
-│       │   └── express.ts                # Middlewares pré/pós-rotas (json, cookie-parser, cors, 404, erros)
+│       │   ├── index.ts                  # Orquestra bootstrap (validateSecurityConfig, waitForDatabase, middlewares)
+│       │   └── express.ts                # Middlewares pré/pós-rotas (helmet, json, cookie-parser, cors, rate limit, 404, erros)
 │       ├── middlewares/
-│       │   ├── jwt.middleware.ts         # Valida JWT do cookie
-│       │   └── admin.middleware.ts       # Verifica claim admin
+│       │   ├── jwt.middleware.ts         # Valida JWT do cookie (HS256 + issuer)
+│       │   ├── admin.middleware.ts       # Verifica claim admin (=== true estrito)
+│       │   └── rateLimit.middleware.ts   # globalRateLimiter + loginRateLimiter
 │       └── utils/                        # Funções globais (ver [[funcoes-globais]])
 │           ├── error.ts                  # AppError, throwUser, throwInternal, parseSchema, handleError
 │           ├── pagination.ts             # Middleware e helpers de paginação (ALS)
@@ -108,7 +109,7 @@ graph LR
 
 ## Fluxo de uma Requisição
 
-1. **Loaders pré-rota** já rodaram no boot: `json`, `cors` (ver [[ciclo-de-vida]]).
+1. **Loaders pré-rota** já rodaram no boot: `helmet`, `json(1mb)`, `cookie-parser`, `cors`, `globalRateLimiter` (ver [[ciclo-de-vida]] e [[seguranca]]).
 2. **Middlewares da rota** executam na ordem do `@Middleware(...)` — ex.: `paginationMiddleware()`, depois `jwtMiddleware`, depois `adminMiddleware`.
 3. **Controller** valida o body com `parseSchema(schema, req.body)`.
 4. Para operações que mutam estado, o controller envolve a chamada em `withTransaction(async () => ...)`.
@@ -128,9 +129,16 @@ Definidas em [`.env`](../../.env.example) e tipadas em [`src/config/index.ts`](.
 | Variável | Descrição |
 | --- | --- |
 | `PORT` | Porta HTTP |
-| `APP_NAME` | `application_name` enviado ao Postgres (default `base_node_pg`) |
-| `AUTHORIZATION` | `1` = JWT/admin obrigatórios · `0` = liberados (dev) |
-| `JWT_SECRET` | Segredo para assinar/verificar tokens (obrigatório no boot) |
+| `APP_NAME` | `application_name` enviado ao Postgres + `issuer` dos JWTs (default `base_node_pg`) |
+| `AUTHORIZATION` | `1` = JWT/admin obrigatórios · `0` = liberados (dev). **Produção exige `1` — boot falha sem** |
+| `JWT_SECRET` | Segredo para assinar/verificar tokens (obrigatório; ≥ 32 chars em produção) |
+| `JWT_EXPIRES_IN_SECONDS` | TTL do JWT de usuário (default 604 800 = 7 dias) |
+| `SERVICE_JWT_EXPIRES_IN_SECONDS` | TTL do JWT de serviço (default 2 592 000 = 30 dias) |
+| `CORS_ORIGINS` | Origens CORS separadas por vírgula (vazio em prod = nenhuma) |
+| `COOKIE_DOMAIN` / `COOKIE_SAMESITE` | Atributos do cookie de auth (default: host-only / `lax`) |
+| `TRUST_PROXY` | Nº de proxies confiáveis (necessário p/ rate limit atrás de proxy) |
+| `RATE_LIMIT_WINDOW_MS` / `RATE_LIMIT_MAX` | Rate limit global por IP (60 000 / 300) |
+| `RATE_LIMIT_LOGIN_WINDOW_MS` / `RATE_LIMIT_LOGIN_MAX` | Rate limit do login, só falhas (60 000 / 5) |
 | `DB_HOST` / `DB_PORT` / `DB_NAME` | Conexão PostgreSQL |
 | `DB_APP_USER` / `DB_APP_PASSWORD` | Usuário da aplicação (DML) |
 | `DB_MIGRATION_USER` / `DB_MIGRATION_PASSWORD` | Usuário de DDL (cai no app user em dev) |
@@ -154,5 +162,6 @@ Definidas em [`.env`](../../.env.example) e tipadas em [`src/config/index.ts`](.
 
 - [[decorators|Sistema de Decorators]] — como `@Controller` e `@ApiBody` funcionam
 - [[ciclo-de-vida|Ciclo de Vida]] — bootstrap e shutdown
+- [[seguranca|Segurança]] — middlewares de segurança e envs relacionadas
 - [[camada-de-acesso|Camada de Acesso a Dados]] — `Database` e transações
 - [[novo-modulo|Criar Novo Módulo]] — exemplo de ponta a ponta

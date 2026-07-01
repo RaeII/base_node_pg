@@ -1,4 +1,4 @@
-import { Request, Response } from "express";
+import { Request, Response, CookieOptions } from "express";
 import jwt from "jsonwebtoken";
 import Controller from "@/shared/core/Controller";
 import { Controller as Route, Post, Middleware } from "@/shared/core/decorators";
@@ -12,10 +12,30 @@ import {
   errorResponseSchema,
   loginResponseSchema,
   loginErrorResponseSchema,
+  logoutResponseSchema,
 } from "@/modules/auth/schemas/auth.schema";
 import jwtMiddleware from "@/shared/middlewares/jwt.middleware";
 import adminMiddleware from "@/shared/middlewares/admin.middleware";
-import { parseSchema, handleError } from "@/shared/utils/error";
+import { loginRateLimiter } from "@/shared/middlewares/rateLimit.middleware";
+import { parseSchema, handleError, AppError } from "@/shared/utils/error";
+import logger from "@/shared/utils/logger";
+
+/**
+ * Atributos do cookie de autenticação.
+ * - `sameSite` default "lax" — bloqueia envio cross-site (defesa CSRF).
+ *   "none" só com HTTPS + defesa CSRF própria (ver doc/arquitetura/seguranca).
+ * - `domain` omitido por padrão → cookie host-only (mais restrito).
+ */
+function authCookieOptions(maxAgeSeconds?: number): CookieOptions {
+  return {
+    httpOnly: true,
+    secure: env.isProduction,
+    sameSite: env.COOKIE_SAMESITE,
+    path: "/",
+    ...(maxAgeSeconds !== undefined && { maxAge: maxAgeSeconds * 1000 }),
+    ...(env.COOKIE_DOMAIN && { domain: env.COOKIE_DOMAIN }),
+  };
+}
 
 @Route("/auth")
 @ApiTags("Autenticação")
@@ -32,22 +52,32 @@ class AuthController extends Controller {
     jwtMiddleware.validJWTNeeded.bind(jwtMiddleware),
     adminMiddleware.adminOnly.bind(adminMiddleware)
   )
-  @ApiSummary("Gerar token JWT", "Gera um token JWT para um nome específico. Requer autenticação e permissão de administrador.")
+  @ApiSummary("Gerar token JWT de serviço", "Gera um token JWT nomeado (service-to-service). Requer autenticação e permissão de administrador.")
   @ApiBody(createJwtBodySchema, "Dados para geração do token")
   @ApiResponse(200, "Token gerado com sucesso", createJwtResponseSchema)
   @ApiResponse(400, "Erro ao gerar token", errorResponseSchema)
   async createJWT(req: Request, res: Response) {
     try {
-      const { name }: { name: string } = req.body;
+      const { name } = parseSchema(createJwtBodySchema, req.body);
 
       const jwtSecret = env.JWT_SECRET as string; // garantido no boot (loaders)
-      const expiresIn = 60 * 60 * 24 * 30; // 30 dias (em segundos)
+      const expiresIn = env.SERVICE_JWT_EXPIRES_IN_SECONDS;
 
+      // type: "service" distingue de token de usuário — não carrega `admin`,
+      // então nunca passa no adminMiddleware.
       const payload = {
         name,
+        type: "service",
       };
 
-      const token = jwt.sign(payload, jwtSecret, { expiresIn });
+      const token = jwt.sign(payload, jwtSecret, { expiresIn, issuer: env.APP_NAME });
+
+      // Auditoria: registra quem emitiu o token de serviço
+      logger.info("Service JWT issued", {
+        name,
+        issuedBy: res.locals?.jwt?.userId ?? null,
+        expiresIn,
+      });
 
       return this.sendSuccessResponse(res, {
         accessToken: token,
@@ -59,6 +89,7 @@ class AuthController extends Controller {
   }
 
   @Post("/login")
+  @Middleware(loginRateLimiter)
   @ApiSummary("Login", "Autentica um usuário com login/email/username e senha. Retorna um cookie JWT.")
   @ApiBody(loginSchema, "Credenciais de acesso")
   @ApiResponse(200, "Login realizado com sucesso", loginResponseSchema)
@@ -67,7 +98,10 @@ class AuthController extends Controller {
     try {
       const data = parseSchema(loginSchema, req.body);
 
-      const identifier = (data.login || data.email || data.username || "").trim();
+      // toLowerCase: username/email são normalizados em minúsculas na criação
+      const identifier = (data.login || data.email || data.username || "")
+        .trim()
+        .toLowerCase();
 
       const user = await this.userService.authenticate({
         identifier,
@@ -75,7 +109,7 @@ class AuthController extends Controller {
       });
 
       const jwtSecret = env.JWT_SECRET as string; // garantido no boot (loaders)
-      const expiresIn = 60 * 60 * 24 * 30; // 30 dias (em segundos)
+      const expiresIn = env.JWT_EXPIRES_IN_SECONDS;
 
       const payload = {
         sub: String(user.id),
@@ -83,26 +117,35 @@ class AuthController extends Controller {
         username: user.username,
         email: user.email,
         admin: user.is_admin,
+        type: "user",
       };
 
-      const token = jwt.sign(payload, jwtSecret, { expiresIn });
+      const token = jwt.sign(payload, jwtSecret, { expiresIn, issuer: env.APP_NAME });
 
-      res.cookie("token_access", token, {
-        httpOnly: true,
-        secure: env.isProduction,
-        sameSite: env.isProduction ? "none" : "lax",
-        maxAge: expiresIn * 1000, // cookie maxAge é em milissegundos
-        path: "/",
-        domain: env.isProduction ? ".example.com" : "localhost",
-      });
+      res.cookie("token_access", token, authCookieOptions(expiresIn));
+
+      // Auditoria de acesso (nunca logar senha/token)
+      logger.info("Login success", { userId: user.id, ip: req.ip });
 
       return res.status(200).json({
         data: user,
         expiresIn,
       });
     } catch (err) {
+      if (err instanceof AppError && err.statusCode === 401) {
+        logger.warn("Login failed", { ip: req.ip });
+      }
       return handleError(err, res);
     }
+  }
+
+  @Post("/logout")
+  @ApiSummary("Logout", "Remove o cookie de autenticação do navegador.")
+  @ApiResponse(200, "Logout realizado com sucesso", logoutResponseSchema)
+  async logout(_req: Request, res: Response) {
+    // clearCookie precisa dos MESMOS atributos usados no set (exceto maxAge)
+    res.clearCookie("token_access", authCookieOptions());
+    return res.status(200).json({ message: "Logout realizado com sucesso" });
   }
 }
 

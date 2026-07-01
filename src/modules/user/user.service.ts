@@ -4,6 +4,13 @@ import type { AuthenticateUserInput, CreateUserInput, DbUserRow, PublicUser, Upd
 import { throwUser, throwInternal } from "@/shared/utils/error";
 import { paginatedResponse, type PaginatedResult } from "@/shared/utils/pagination";
 
+// Custo equilibrado para API (ajuste se necessário)
+const SALT_ROUNDS = 12;
+
+// Hash "sacrifício": quando o usuário não existe, compara contra este hash
+// para a resposta demorar o mesmo que uma senha errada — sem isso, a diferença
+// de tempo revela quais usuários existem (timing attack).
+const DUMMY_PASSWORD_HASH = bcrypt.hashSync("__timing_equalizer__", SALT_ROUNDS);
 
 function toPublicUser(row: DbUserRow): PublicUser {
   return {
@@ -49,24 +56,20 @@ export default class UserService {
   /**
    * Autentica um usuário por email ou username + senha.
    * Retorna APENAS dados públicos (nunca retorna hash da senha).
+   *
+   * Anti-enumeração: inexistente, senha errada e inativo respondem TODOS
+   * com o mesmo 401 "Credenciais inválidas", em tempo equivalente.
    */
   async authenticate(input: AuthenticateUserInput): Promise<PublicUser> {
-    const identifier = input.identifier.trim();
+    const identifier = input.identifier.trim().toLowerCase();
     const password = input.password;
 
     const row = await this.userDb.findByUsernameOrEmail(identifier);
 
-    if (!row) {
-      throwUser("Credenciais inválidas", 401);
-    }
+    const ok = await bcrypt.compare(password, row?.password || DUMMY_PASSWORD_HASH);
 
-    const ok = row.password ? await bcrypt.compare(password, row.password) : false;
-    if (!ok) {
+    if (!row || !ok || !row.is_active) {
       throwUser("Credenciais inválidas", 401);
-    }
-
-    if (!row.is_active) {
-      throwUser("Usuário não encontrado", 403);
     }
 
     await this.userDb.updateLastLoginAt(row.id);
@@ -87,9 +90,7 @@ export default class UserService {
       }
     }
 
-    // Custo equilibrado para API (ajuste se necessário)
-    const saltRounds = 12;
-    const passwordHash = await bcrypt.hash(input.password, saltRounds);
+    const passwordHash = await bcrypt.hash(input.password, SALT_ROUNDS);
 
     const created = await this.userDb.createUser({
       username: input.username,
@@ -137,8 +138,7 @@ export default class UserService {
     // Hash da senha se foi enviada
     let passwordHash: string | undefined;
     if (input.password) {
-      const saltRounds = 12;
-      passwordHash = await bcrypt.hash(input.password, saltRounds);
+      passwordHash = await bcrypt.hash(input.password, SALT_ROUNDS);
     }
 
     await this.userDb.updateUser(id, {

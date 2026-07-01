@@ -96,6 +96,15 @@ const GENERIC_MESSAGE = "Ocorreu um erro interno";
  */
 export function handleError(error: unknown, res: Response): Response {
 
+  // ── Violação de UNIQUE do PostgreSQL (23505) ──
+  // Corrida entre o check de unicidade e o INSERT/UPDATE: a constraint segura,
+  // e aqui vira 409 para o cliente em vez de 500 + alerta.
+  if ((error as any)?.code === "23505") {
+    return res.status(409).json({
+      message: "Registro duplicado — valor já está em uso",
+    });
+  }
+
   // ── AppError conhecido ──
   if (error instanceof AppError) {
     if (error.isUserError) {
@@ -126,6 +135,24 @@ export function handleError(error: unknown, res: Response): Response {
 
 // ─── Helpers internos ────────────────────────────────────────────
 
+// Throttle de alertas Discord: a MESMA mensagem só alerta 1x por janela.
+// Sem isso, um atacante que force erros repetidos (ou um bug em loop) flooda
+// o canal. O log em arquivo continua registrando TODAS as ocorrências.
+const DISCORD_ALERT_COOLDOWN_MS = 60_000;
+const MAX_TRACKED_MESSAGES = 500;
+const lastAlertAt = new Map<string, number>();
+
+function shouldNotifyDiscord(message: string): boolean {
+  const now = Date.now();
+  const last = lastAlertAt.get(message) ?? 0;
+  if (now - last < DISCORD_ALERT_COOLDOWN_MS) return false;
+
+  // Evita crescimento sem limite do Map em cenário de mensagens únicas
+  if (lastAlertAt.size >= MAX_TRACKED_MESSAGES) lastAlertAt.clear();
+  lastAlertAt.set(message, now);
+  return true;
+}
+
 function logAndNotify(message: string, error: unknown): void {
   const meta: Record<string, unknown> = {};
 
@@ -137,6 +164,8 @@ function logAndNotify(message: string, error: unknown): void {
   }
 
   logger.error(message, meta);
+
+  if (!shouldNotifyDiscord(message)) return;
 
   // Fire-and-forget — não bloqueia a resposta
   sendDiscord

@@ -9,21 +9,25 @@ import { createPaginatedSchema } from "@/shared/utils/pagination";
  */
 export const createUserSchema = z
   .object({
+    // toLowerCase: unicidade case-insensitive (o banco compara case-sensitive)
     username: z
       .string({ error: "username é obrigatório" })
       .trim()
+      .toLowerCase()
       .min(3, "username deve ter no mínimo 3 caracteres")
       .max(45, "username deve ter no máximo 45 caracteres"),
     email: z
       .string()
       .trim()
+      .toLowerCase()
       .max(45, "email deve ter no máximo 45 caracteres")
       .email("email inválido")
       .optional(),
+    // max 72: bcrypt trunca silenciosamente senhas acima de 72 bytes
     password: z
       .string({ error: "password é obrigatório" })
-      .min(6, "password deve ter no mínimo 6 caracteres")
-      .max(255, "password deve ter no máximo 255 caracteres"),
+      .min(8, "password deve ter no mínimo 8 caracteres")
+      .max(72, "password deve ter no máximo 72 caracteres"),
     is_active: z.boolean().optional().default(true),
     is_admin: z.boolean().optional().default(false),
   })
@@ -52,13 +56,26 @@ export const publicUserSchema = z.object({
 export type PublicUser = z.infer<typeof publicUserSchema>;
 
 
+/**
+ * Schema de validação de path param `:id`.
+ * Uso: `const { id } = parseSchema(idParamsSchema, req.params)`.
+ * Sem isso, `Number("abc") = NaN` chega ao driver PG e vira 500 + alerta.
+ */
+export const idParamsSchema = z.object({
+  id: z.coerce.number().int("id deve ser um inteiro").positive("id deve ser positivo"),
+});
+
 // ─── Schemas de Banco de Dados ──────────────────────────────────
 
+/**
+ * Linha "segura" do usuário — SEM a coluna `password`.
+ * As queries do repositório projetam colunas explícitas (nunca `SELECT *`),
+ * para o hash de senha não circular pelas camadas sem necessidade.
+ */
 export const dbUserRowSchema = z.object({
   id: z.number(),
   username: z.string(),
   email: z.string().nullable(),
-  password: z.string(),
   is_active: z.boolean(),
   is_admin: z.boolean(),
   last_login_at: z.date().nullable(),
@@ -67,6 +84,9 @@ export const dbUserRowSchema = z.object({
 });
 
 export type DbUserRow = z.infer<typeof dbUserRowSchema>;
+
+/** Linha com hash de senha — exclusiva do fluxo de autenticação. */
+export type DbUserAuthRow = DbUserRow & { password: string };
 
 export const createUserDbInputSchema = z.object({
   username: z.string(),
@@ -89,19 +109,21 @@ export const updateUserSchema = z
     username: z
       .string()
       .trim()
+      .toLowerCase()
       .min(3, "username deve ter no mínimo 3 caracteres")
       .max(45, "username deve ter no máximo 45 caracteres")
       .optional(),
     email: z
       .string()
       .trim()
+      .toLowerCase()
       .max(45, "email deve ter no máximo 45 caracteres")
       .email("email inválido")
       .optional(),
     password: z
       .string()
-      .min(6, "password deve ter no mínimo 6 caracteres")
-      .max(255, "password deve ter no máximo 255 caracteres")
+      .min(8, "password deve ter no mínimo 8 caracteres")
+      .max(72, "password deve ter no máximo 72 caracteres")
       .optional(),
     is_active: z.boolean().optional(),
     is_admin: z.boolean().optional(),

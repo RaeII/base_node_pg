@@ -11,6 +11,7 @@ import {
   usersListResponseSchema,
   messageResponseSchema,
   validationErrorResponseSchema,
+  idParamsSchema,
 } from "@/modules/user/schema/user.schema";
 import jwtMiddleware from "@/shared/middlewares/jwt.middleware";
 import adminMiddleware from "@/shared/middlewares/admin.middleware";
@@ -57,7 +58,7 @@ class UserController extends Controller {
   @ApiResponse(404, "Usuário não encontrado", messageResponseSchema)
   async findById(req: Request, res: Response) {
     try {
-      const id = Number(req.params.id);
+      const { id } = parseSchema(idParamsSchema, req.params);
       const user = await this.userService.findById(id);
 
       return res.status(200).json({
@@ -112,7 +113,7 @@ class UserController extends Controller {
   @ApiResponse(404, "Usuário não encontrado", messageResponseSchema)
   async update(req: Request, res: Response) {
     try {
-      const id = Number(req.params.id);
+      const { id } = parseSchema(idParamsSchema, req.params);
       const data = parseSchema(updateUserSchema, req.body);
 
       const updated = await withTransaction(async () => {
@@ -138,7 +139,7 @@ class UserController extends Controller {
   @ApiResponse(404, "Usuário não encontrado", messageResponseSchema)
   async delete(req: Request, res: Response) {
     try {
-      const id = Number(req.params.id);
+      const { id } = parseSchema(idParamsSchema, req.params);
 
       await withTransaction(async () => {
         await this.userService.deleteUser(id);

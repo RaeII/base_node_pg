@@ -9,6 +9,9 @@ tags:
 
 Passo a passo para adicionar um novo domínio. Use o [[usuarios|Módulo Usuários]] como referência viva.
 
+> [!warning] Leia [[seguranca|Segurança]] antes de começar
+> O checklist de segurança de lá é obrigatório — em especial: **validar path params com Zod** (nunca `Number(req.params.id)` cru), projeção explícita de colunas em tabelas com dados sensíveis e rate limiter dedicado em endpoints sensíveis a brute-force.
+
 ---
 
 ## Estrutura a criar
@@ -37,6 +40,11 @@ export const createItemSchema = z
   .strict();
 export type CreateItemInput = z.infer<typeof createItemSchema>;
 
+// Path param :id — obrigatório validar (NaN cru no driver vira 500 + alerta)
+export const idParamsSchema = z.object({
+  id: z.coerce.number().int().positive(),
+});
+
 // Resposta (Swagger + type safety)
 export const itemResponseSchema = z.object({
   data: z.object({
@@ -62,8 +70,10 @@ interface ItemRow { id: number; name: string }
 
 export default class ItemDatabase extends Database {
   async findById(id: number) {
+    // Projeção explícita — se a tabela tiver coluna sensível (senha, token),
+    // NUNCA use SELECT * (ver doc de segurança)
     const r = await this.query<ItemRow>(
-      `SELECT * FROM "item" WHERE id = $1 LIMIT 1`,
+      `SELECT id, name FROM "item" WHERE id = $1 LIMIT 1`,
       [id],
     );
     return r.rows[0] ?? null;
@@ -121,7 +131,7 @@ import { handleError, parseSchema } from "@/shared/utils/error";
 import { withTransaction } from "@/db/transaction";
 import jwtMiddleware from "@/shared/middlewares/jwt.middleware";
 import adminMiddleware from "@/shared/middlewares/admin.middleware";
-import { createItemSchema, itemResponseSchema } from "./schema/item.schema";
+import { createItemSchema, idParamsSchema, itemResponseSchema } from "./schema/item.schema";
 import ItemService from "./item.service";
 
 @Route("/item")
@@ -136,7 +146,9 @@ class ItemController extends Controller {
   @ApiResponse(404, "Não encontrado")
   async findById(req: Request, res: Response) {
     try {
-      const data = await this.service.findById(Number(req.params.id));
+      // Path param SEMPRE validado — Number(req.params.id) cru é proibido
+      const { id } = parseSchema(idParamsSchema, req.params);
+      const data = await this.service.findById(id);
       return res.status(200).json({ data });
     } catch (err) {
       return handleError(err, res);
@@ -188,19 +200,26 @@ Rotas e Swagger são registrados automaticamente. Não esqueça da [[migrations|
 
 ## Checklist
 
-- [ ] `schema/<modulo>.schema.ts` com entrada (`.strict()`, `.max()`) e resposta
-- [ ] `<modulo>.database.ts` estende `Database`, `{ noRetry }` em `INSERT` simples
+- [ ] `schema/<modulo>.schema.ts` com entrada (`.strict()`, `.max()`), **`idParamsSchema`** e resposta
+- [ ] **Path params validados** com `parseSchema(idParamsSchema, req.params)` — nunca `Number(req.params.id)` cru
+- [ ] `<modulo>.database.ts` estende `Database`, `{ noRetry }` em `INSERT` simples, SQL parametrizado (`$1`)
+- [ ] Projeção explícita de colunas se a tabela tiver dado sensível (nunca `SELECT *`)
 - [ ] `<modulo>.service.ts` usa o database e lança `throwUser` quando preciso
 - [ ] `<modulo>.controller.ts` usa `@Route`, `@ApiTags`, `parseSchema`, `handleError`
+- [ ] Rotas protegidas com `jwtMiddleware` (+ `adminMiddleware` se admin-only), via `.bind`
+- [ ] Endpoint sensível a brute-force → rate limiter dedicado ([[seguranca]])
 - [ ] Mutações envolvidas em `withTransaction`
+- [ ] Campos únicos com constraint UNIQUE na migration (o `handleError` converte `23505` → `409`)
 - [ ] Nenhum `z.object(...)` inline no controller
 - [ ] Controller registrado em `src/index.ts`
 - [ ] Migration criada para a tabela
+- [ ] Checklist de segurança de [[seguranca#Regras para módulos novos (checklist de segurança)]] revisado
 
 ---
 
 ## Relacionado
 
+- [[seguranca|Segurança]] — checklist de segurança obrigatório
 - [[decorators|Decorators]] — referência completa
 - [[schemas-zod|Schemas Zod]] — convenção de organização
 - [[camada-de-acesso|Camada de Acesso a Dados]] — `Database`, `withTransaction`

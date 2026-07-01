@@ -51,6 +51,13 @@ await sendDiscord.sendAlert("APP_ERROR", "Título", "Mensagem");     // alerta g
 
 Chamado automaticamente por `handleError`/`throwInternal` (ver [[tratamento-de-erros]]) em modo **fire-and-forget** — nunca bloqueia nem mascara a resposta. Os embeds são carimbados com [[funcoes-globais#Data/hora BR — getDateTimeBr.ts|data/hora de Brasília]].
 
+> [!important] Throttle anti-flood
+> A **mesma mensagem** de erro só gera alerta 1x por minuto (`shouldNotifyDiscord` em `error.ts`) — o log em arquivo registra todas as ocorrências. Sem isso, erros repetidos (atacante ou bug em loop) floodam o canal. O watchdog do pool tem cooldown próprio (`POOL_WATCHDOG_COOLDOWN_MS`).
+
+### Auditoria de autenticação
+
+O módulo auth registra no Winston: `Login success` (`userId`, `ip`), `Login failed` (`ip`) e `Service JWT issued` (`name`, `issuedBy`). Nunca logue senha, hash ou token — ver [[seguranca]].
+
 ---
 
 ## Watchdog do pool

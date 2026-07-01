@@ -71,6 +71,7 @@ async create(req: Request, res: Response) {
 
 `handleError` decide a resposta:
 
+- **`23505` (violação de UNIQUE do PostgreSQL)** → responde `409 "Registro duplicado — valor já está em uso"`, sem log/alerta. Cobre a corrida entre o check de unicidade no service e o `INSERT`/`UPDATE` — quem garante é a constraint do banco.
 - `AppError` com `isUserError = true` → responde `statusCode` + `message` (+ `issues`, se houver).
 - `AppError` com `isUserError = false` → loga + Discord, responde `statusCode` com `"Ocorreu um erro interno"`.
 - Qualquer outro erro → loga + Discord, responde `500` genérico.
@@ -90,6 +91,19 @@ graph LR
 
 > [!note] Discord é fire-and-forget
 > A notificação (`sendDiscord.sendErrorAlert`) não bloqueia a resposta. Se o webhook falhar, a falha é apenas logada (`logger.warn`) — nunca mascara o erro original. Em produção a stack não vai para o console (só para o arquivo de log). Ver [[observabilidade]].
+
+> [!important] Throttle de alertas Discord
+> A **mesma mensagem** de erro só gera alerta 1x por minuto (`shouldNotifyDiscord` em `error.ts`). O log em arquivo continua registrando todas as ocorrências. Sem o throttle, um atacante ou um bug em loop flooda o canal — ver [[seguranca]].
+
+---
+
+## Handler final do Express
+
+Erros que **não** passam por `handleError` (falha em middleware, JSON malformado no body, rota futura sem try/catch) caem no handler final de `loaders/express.ts`:
+
+- Precisa ter **exatamente 4 parâmetros** (`err, req, res, next`) — o Express identifica error handlers pela aridade da função.
+- Status `>= 500` → loga no Winston; em **produção responde mensagem genérica** (nunca `err.message` interno). Status `< 500` (ex.: `400` de JSON inválido) responde a mensagem do erro.
+- Formato da resposta: `{ "message": "..." }` (mesmo formato do `handleError`).
 
 ---
 

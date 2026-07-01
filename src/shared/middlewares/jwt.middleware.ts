@@ -5,6 +5,7 @@ import { env } from "@/config";
 class JwtMiddleware {
   validJWTNeeded(req: Request, res: Response, next: NextFunction): void {
     // Bypass de desenvolvimento: só faz sentido com AUTHORIZATION=0 fora de produção.
+    // Em produção o boot falha se AUTHORIZATION !== 1 (ver loaders/index.ts).
     if (!env.AUTHORIZATION) return next();
 
     const token = req.cookies?.['token_access'];
@@ -18,7 +19,11 @@ class JwtMiddleware {
 
     try {
       const jwtSecret = env.JWT_SECRET as string;
-      const decoded = jwt.verify(token, jwtSecret);
+      // algorithms fixo evita confusão de algoritmo; issuer amarra o token a esta app
+      const decoded = jwt.verify(token, jwtSecret, {
+        algorithms: ["HS256"],
+        issuer: env.APP_NAME,
+      });
       res.locals.jwt = decoded;
       return next();
     } catch (err) {
@@ -30,4 +35,4 @@ class JwtMiddleware {
   }
 }
 
-export default new JwtMiddleware(); 
+export default new JwtMiddleware();

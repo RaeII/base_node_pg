@@ -8,11 +8,11 @@ A documentação canônica vive em [`doc/`](doc/index-doc.md) (vault Obsidian, e
 
 - **Antes de implementar:** leia o índice [`doc/index-doc.md`](doc/index-doc.md) e a(s) página(s) relevantes da área que vai tocar (arquitetura, banco-de-dados, módulos, global, guias). As convenções do projeto estão lá, não as reinvente.
 - **Ao mudar código:** atualize a documentação correspondente na **mesma tarefa**. Mudou um endpoint/contrato → atualize o módulo em `doc/modulos/` e a tabela de endpoints em `doc/index-doc.md`. Mudou uma função global → `doc/global/`. Mudou env/comandos → `doc/arquitetura/estrutura.md` e `doc/guias/comandos.md`.
-- **Ao criar um módulo:** siga o passo a passo de [`doc/guias/novo-modulo.md`](doc/guias/novo-modulo.md) e crie a página do módulo em `doc/modulos/<modulo>/`.
+- **Ao criar um módulo:** siga o passo a passo de [`doc/guias/novo-modulo.md`](doc/guias/novo-modulo.md), **cumpra o checklist de [`doc/arquitetura/seguranca.md`](doc/arquitetura/seguranca.md)** e crie a página do módulo em `doc/modulos/<modulo>/`.
 - **Formato:** os arquivos `.md` em `doc/` são Obsidian Flavored Markdown — use wikilinks `[[nota]]`, callouts `> [!tip]` e frontmatter. Mantenha os wikilinks válidos (apontando para `name:` de notas existentes).
 - **Fonte da verdade:** se código e doc divergirem, trate como bug e corrija ambos para ficarem consistentes.
 
-Mapa da doc: `arquitetura/` (estrutura, decorators, ciclo-de-vida, tratamento-de-erros) · `banco-de-dados/` (camada-de-acesso, postgres, migrations) · `modulos/` (auth, usuarios, sistema) · `global/` (funcoes-globais, paginacao, observabilidade) · `guias/` (comandos, novo-modulo, schemas-zod).
+Mapa da doc: `arquitetura/` (estrutura, decorators, ciclo-de-vida, tratamento-de-erros, **seguranca**) · `banco-de-dados/` (camada-de-acesso, postgres, migrations) · `modulos/` (auth, usuarios, sistema) · `global/` (funcoes-globais, paginacao, observabilidade) · `guias/` (comandos, novo-modulo, schemas-zod).
 
 ## Comandos
 
@@ -40,11 +40,13 @@ API REST: **TypeScript + Express 5 + PostgreSQL (sem ORM, driver `pg`)**. Roteam
 - **Camadas:** Controller valida com `parseSchema`, envolve mutações em `withTransaction`, responde, e usa `handleError(err, res)` no `catch`. Service tem a regra de negócio e lança `throwUser`/`throwInternal`. Database estende `Database` (`src/shared/infra/database/Database.ts`) e só faz SQL via `this.query(...)`.
 - **Banco (`src/db/`):** pool duplo `writePool`/`readPool`; `query()`/`readQuery()` com retry de transientes e log sanitizado (nunca logam `params`); `withTransaction` usa `AsyncLocalStorage` (a camada Database pega o client da tx automaticamente) com cleanup `release(true)` e retry de `40001`/`40P01`; `healthCheck`/`getPoolMetrics` expostos no módulo `system`; watchdog alerta no Discord em saturação.
 - **Erros (`src/shared/utils/error.ts`):** `throwUser` (vai ao cliente, sem log) vs `throwInternal` (genérico + Winston + Discord). `AppError` carrega `statusCode`/`isUserError`/`issues`.
-- **Boot/shutdown (`src/index.ts`, `src/shared/loaders/`):** valida `JWT_SECRET` → `waitForDatabase()` → middlewares (`json`, `cookie-parser`, `cors`) → controllers → Swagger (fora de produção) → `listen` → `startPoolWatchdog`. Shutdown separa `drain()` (fecha) de `gracefulShutdown()` (exit 0); `uncaughtException` faz `drain` + exit 1.
+- **Boot/shutdown (`src/index.ts`, `src/shared/loaders/`):** `validateSecurityConfig()` (fail-closed: `JWT_SECRET` ≥ 32 chars e `AUTHORIZATION=1` obrigatórios em produção) → `waitForDatabase()` → middlewares (`helmet`, `json(1mb)`, `cookie-parser`, `cors` via `CORS_ORIGINS`, `globalRateLimiter`) → controllers → Swagger (fora de produção) → `listen` → `startPoolWatchdog`. Shutdown separa `drain()` (fecha) de `gracefulShutdown()` (exit 0); `uncaughtException` faz `drain` + exit 1.
 
 ## Convenções obrigatórias
 
 - **Schemas Zod sempre em `*.schema.ts`**, nunca inline no controller. Use `.strict()` em bodies e `.max()` em toda string. Não importe `z` no controller.
+- **Path params validados com Zod** (`parseSchema(idParamsSchema, req.params)`) — nunca `Number(req.params.id)` cru. Checklist completo em `doc/arquitetura/seguranca.md`.
+- **Tabelas com dado sensível** (senha, token): projeção explícita de colunas, nunca `SELECT *`.
 - **Status ≠ 200:** `Controller.sendSuccessResponse` responde **sempre 200** — para `201`/`204` use `res.status(...).json(...)`.
 - **Transações:** mutações multi-tabela ficam em `withTransaction(...)` no controller. Nunca dispare efeitos colaterais externos (email, fila, API) dentro da função — ela pode reexecutar por retry; use outbox.
 - **Queries não-idempotentes** (`INSERT` simples): passe `{ noRetry: true }` ao `this.query`. Sempre parametrize (`$1`); nunca concatene input em SQL.

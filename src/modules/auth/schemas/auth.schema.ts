@@ -55,12 +55,20 @@ export const loginSchema = z
 
 export type LoginSchema = z.infer<typeof loginSchema>;
 
-// ─── Schemas de Body (documentação Swagger) ─────────────────────
+// ─── Schemas de Body ────────────────────────────────────────────
 
-/** Schema de body para geração de token JWT */
-export const createJwtBodySchema = z.object({
-  name: z.string(),
-});
+/** Schema de body para geração de token JWT de serviço */
+export const createJwtBodySchema = z
+  .object({
+    name: z
+      .string({ error: "name é obrigatório" })
+      .trim()
+      .min(3, "name deve ter no mínimo 3 caracteres")
+      .max(100, "name deve ter no máximo 100 caracteres"),
+  })
+  .strict();
+
+export type CreateJwtBody = z.infer<typeof createJwtBodySchema>;
 
 // ─── Schemas de Resposta (documentação Swagger) ─────────────────
 
@@ -85,6 +93,11 @@ export const loginResponseSchema = z.object({
     is_admin: z.boolean(),
   }),
   expiresIn: z.number(),
+});
+
+/** Schema de resposta do logout (200) */
+export const logoutResponseSchema = z.object({
+  message: z.string(),
 });
 
 /** Schema de resposta de erro de validação no login (400) */

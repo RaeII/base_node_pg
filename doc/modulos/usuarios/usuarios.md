@@ -39,6 +39,8 @@ Todas as rotas exigem **JWT + Admin** (`AUTHORIZATION=1`). Tabela: `"user"`.
 
 As respostas de item vêm envelopadas em `{ "data": ... }`.
 
+O path param `:id` é validado com `idParamsSchema` (`parseSchema(idParamsSchema, req.params)`) — inteiro positivo, senão `400`. **Nunca use `Number(req.params.id)` cru** (`NaN` chega ao driver PG e vira 500 + alerta). Ver [[seguranca]].
+
 ---
 
 ## Paginação
@@ -63,10 +65,16 @@ As respostas de item vêm envelopadas em `{ "data": ... }`.
 
 ## Regras de negócio (Service)
 
-- **Criação:** valida unicidade de `username` e `email`; faz hash com `bcrypt` (12 rounds); `INSERT` com `{ noRetry: true }` (não-idempotente).
+- **Criação:** valida unicidade de `username` e `email`; faz hash com `bcrypt` (12 rounds); `INSERT` com `{ noRetry: true }` (não-idempotente). `username`/`email` são normalizados para **minúsculas** no schema (unicidade case-insensitive na prática).
+- **Senha:** mínimo 8, máximo **72** caracteres (bcrypt trunca silenciosamente acima de 72 bytes).
 - **Atualização:** parcial — só os campos enviados; revalida unicidade ao trocar `username`/`email`; refaz o hash se a senha vier.
+- **Corrida de unicidade:** o check no service é UX; quem garante é a constraint UNIQUE do banco. Se a corrida acontecer, o `23505` vira `409` no `handleError` ([[tratamento-de-erros]]).
 - **Soft delete:** marca `is_active = FALSE` (idempotente). Usuários inativos não aparecem nas listagens, mas os dados são preservados.
+- **Autenticação (`authenticate`)**: anti-enumeração + anti-timing — inexistente, senha errada e inativo respondem o mesmo `401`; hash dummy iguala o tempo de resposta. Ver [[seguranca#Autenticação (módulo user/auth)]].
 - **Saída pública:** `toPublicUser()` nunca retorna o campo `password`.
+
+> [!important] Hash de senha não circula pelas camadas
+> O repositório projeta colunas explícitas (`USER_COLUMNS`, **sem** `password`) — nunca `SELECT *`. Só `findByUsernameOrEmail` (fluxo de login) retorna o hash, tipado como `DbUserAuthRow`.
 
 ---
 
@@ -76,11 +84,13 @@ Definidos em `schema/user.schema.ts` (ver [[schemas-zod]]):
 
 | Schema | Uso |
 | --- | --- |
-| `createUserSchema` | Body de criação (`.strict()`) |
+| `createUserSchema` | Body de criação (`.strict()`, senha 8–72, lowercase em username/email) |
 | `updateUserSchema` | Body de atualização (campos opcionais, `.strict()`) |
+| `idParamsSchema` | Path param `:id` (`z.coerce.number().int().positive()`) |
 | `authenticateUserSchema` | Input de autenticação (usado pelo [[auth]]) |
 | `publicUserSchema` | Usuário público (sem `password`) |
-| `dbUserRowSchema` | Linha crua do banco |
+| `dbUserRowSchema` / `DbUserRow` | Linha do banco **sem** `password` (projeção `USER_COLUMNS`) |
+| `DbUserAuthRow` | `DbUserRow` + `password` — exclusivo do fluxo de login |
 | `userResponseSchema` / `createUserResponseSchema` | Respostas Swagger |
 | `usersListResponseSchema` | Listagem paginada (`createPaginatedSchema(publicUserSchema)`) |
 | `messageResponseSchema` / `validationErrorResponseSchema` | Mensagem / erro de validação |

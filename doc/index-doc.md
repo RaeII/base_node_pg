@@ -32,9 +32,10 @@ Boilerplate de API REST com **TypeScript + Express 5 + PostgreSQL**, executado c
 | Linguagem | TypeScript 5.3 (`strict`, decorators) |
 | Validação | Zod v4 (`toJSONSchema` nativo) |
 | Banco | PostgreSQL — `pg` (node-postgres, pool duplo write/read) |
-| Auth | JWT (cookie httpOnly) + bcrypt |
+| Auth | JWT (cookie httpOnly, `sameSite=lax`) + bcrypt |
+| Segurança HTTP | helmet + rate limit (`express-rate-limit`) + CORS por env |
 | Docs | Swagger UI / OpenAPI 3.0 (gerado dos decorators) |
-| Observabilidade | Winston (rotação diária) + alertas Discord |
+| Observabilidade | Winston (rotação diária) + alertas Discord (com throttle) |
 
 ---
 
@@ -46,6 +47,7 @@ Boilerplate de API REST com **TypeScript + Express 5 + PostgreSQL**, executado c
 - [[decorators|Sistema de Decorators]] — `@Controller`/`@Route`, `@Get`, `@ApiBody` e Swagger automático
 - [[ciclo-de-vida|Ciclo de Vida da Aplicação]] — bootstrap, loaders, watchdog e graceful shutdown
 - [[tratamento-de-erros|Tratamento de Erros]] — `AppError`, `throwUser`, `throwInternal`, `handleError`
+- [[seguranca|Segurança]] — fail-closed, rate limit, cookie/CORS, JWT, checklist para módulos novos ⚠️ **leia antes de criar módulos**
 
 ### 🗄 Banco de Dados
 
@@ -76,12 +78,13 @@ Boilerplate de API REST com **TypeScript + Express 5 + PostgreSQL**, executado c
 ## Endpoints
 
 > [!warning] Autorização
-> As rotas protegidas só são efetivamente bloqueadas quando `AUTHORIZATION=1` no `.env`. Com `AUTHORIZATION=0` os middlewares deixam passar — útil em dev, **nunca em produção**. Veja [[auth#Middlewares de Autenticação]].
+> As rotas protegidas só são efetivamente bloqueadas quando `AUTHORIZATION=1` no `.env`. Com `AUTHORIZATION=0` os middlewares deixam passar — útil em dev. **Em produção o boot falha se `AUTHORIZATION != 1`** (fail-closed — ver [[seguranca]]).
 
 | Método | Rota | Auth | Descrição |
 | --- | --- | --- | --- |
-| `POST` | `/api/auth/login` | — | Login → cookie `token_access` |
-| `POST` | `/api/auth/create-jwt` | JWT + Admin | Gera JWT nomeado (service-to-service) |
+| `POST` | `/api/auth/login` | Rate limit | Login → cookie `token_access` |
+| `POST` | `/api/auth/logout` | — | Remove o cookie de autenticação |
+| `POST` | `/api/auth/create-jwt` | JWT + Admin | Gera JWT de serviço (`type: "service"`) |
 | `GET` | `/api/user/` | JWT + Admin | Listar usuários (paginado) |
 | `GET` | `/api/user/:id` | JWT + Admin | Buscar por ID |
 | `POST` | `/api/user/` | JWT + Admin | Criar usuário (em transação) |
@@ -98,6 +101,8 @@ Boilerplate de API REST com **TypeScript + Express 5 + PostgreSQL**, executado c
 
 - **Camadas**: `Controller → Service → Database`. SQL só na camada Database. Veja [[estrutura]].
 - **Schemas Zod**: sempre em `*.schema.ts`, nunca inline no controller. Veja [[schemas-zod]].
-- **Erros**: `throwUser` (vai ao cliente) vs `throwInternal` (loga + Discord). Veja [[tratamento-de-erros]].
+- **Validação total de input**: body **e path params** via `parseSchema` (ex.: `idParamsSchema` para `:id`). Veja [[seguranca]].
+- **Erros**: `throwUser` (vai ao cliente) vs `throwInternal` (loga + Discord, com throttle). Veja [[tratamento-de-erros]].
 - **Transações**: mutações multi-tabela ficam dentro de `withTransaction(...)` no controller. Veja [[camada-de-acesso]].
+- **Segurança**: checklist obrigatório para módulos novos em [[seguranca#Regras para módulos novos (checklist de segurança)]].
 - **Alias de import**: `@/*` aponta para `src/*` (configurado no `tsconfig.json`).

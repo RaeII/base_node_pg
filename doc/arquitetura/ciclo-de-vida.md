@@ -17,10 +17,10 @@ Como a aplicação sobe, registra middlewares e desliga de forma graciosa. Imple
 ```mermaid
 graph TD
     START["startServer()"] --> PRE["initializePreRouteLoaders(app)"]
-    PRE --> JWT{"JWT_SECRET definido?"}
-    JWT -->|não| FAIL["throw — app não sobe"]
-    JWT -->|sim| WAIT["waitForDatabase()"]
-    WAIT --> MW["json + cors"]
+    PRE --> SEC{"validateSecurityConfig()\nJWT_SECRET ≥32 · AUTHORIZATION=1 em prod"}
+    SEC -->|inválido| FAIL["throw — app não sobe (fail-closed)"]
+    SEC -->|ok| WAIT["waitForDatabase()"]
+    WAIT --> MW["helmet + json(1mb) + cookie-parser + cors + rate limit"]
     MW --> REG["registerControllers(app, /api, controllers)"]
     REG --> SWG["setupSwagger(...) (fora de produção)"]
     SWG --> POST["initializePostRouteLoaders(app) — 404 + error handlers"]
@@ -31,14 +31,17 @@ graph TD
 Ordem garantida em `startServer()`:
 
 1. **Pré-rota** (`initializePreRouteLoaders`):
-   - valida `JWT_SECRET` (lança erro e impede o boot se ausente);
+   - `validateSecurityConfig()` — **fail-closed**: aborta o boot se `JWT_SECRET` ausente (ou < 32 chars em produção) ou se produção com `AUTHORIZATION != 1`; avisa se produção sem `DB_SSL`/`CORS_ORIGINS`. Ver [[seguranca]];
    - `waitForDatabase()` — espera o Postgres ficar disponível com backoff exponencial (1s→2s→…→30s, até 10 tentativas);
-   - registra `express.json({ limit: '10mb' })`, `cookie-parser` (necessário p/ ler o cookie JWT) e `cors` (`credentials: true`, origin `http://localhost:3000`).
+   - registra `trust proxy` (se `TRUST_PROXY` > 0), `helmet()`, `express.json({ limit: '1mb' })`, `cookie-parser` (necessário p/ ler o cookie JWT), `cors` (origens de `CORS_ORIGINS`) e `globalRateLimiter`.
 2. **Rotas**: `registerControllers(app, "/api", controllers)`.
 3. **Swagger**: `setupSwagger(...)` — pulado em produção.
-4. **Pós-rota** (`initializePostRouteLoaders`): handler 404 + handlers de erro do Express.
+4. **Pós-rota** (`initializePostRouteLoaders`): handler 404 + handler final de erro (4 parâmetros; 5xx genérico em produção — ver [[tratamento-de-erros#Handler final do Express]]).
 5. `app.listen(PORT)`.
 6. `startPoolWatchdog()` — monitor periódico dos pools (ver [[observabilidade]]).
+
+> [!note] Falha de boot é fatal e visível
+> `startServer().catch(...)` imprime `Fatal boot error: ...` no console e sai com `exit(1)`. Sem esse catch, a rejeição iria silenciosa para o rejections log do Winston e o processo ficaria vivo sem `listen`.
 
 > [!warning] `waitForDatabase` antes do `listen`
 > A app só passa a aceitar tráfego depois que o banco responde a `SELECT 1`. Em K8s/deploy isso evita servir requisições antes do banco estar pronto. O bootstrap recomendado é `waitForDatabase()` → migrations → `listen()` (rode as migrations no pipeline de deploy — ver [[migrations]]).
@@ -49,10 +52,10 @@ Ordem garantida em `startServer()`:
 
 | Função | Arquivo | Papel |
 | --- | --- | --- |
-| `initializePreRouteLoaders(app)` | `loaders/index.ts` | Valida env, espera o banco, carrega middlewares pré-rota |
-| `loadPreRouteMiddlewares(app)` | `loaders/express.ts` | `json` + `cookie-parser` + `cors` |
+| `initializePreRouteLoaders(app)` | `loaders/index.ts` | `validateSecurityConfig()` (fail-closed), espera o banco, carrega middlewares pré-rota |
+| `loadPreRouteMiddlewares(app)` | `loaders/express.ts` | `trust proxy` + `helmet` + `json(1mb)` + `cookie-parser` + `cors` + `globalRateLimiter` |
 | `initializePostRouteLoaders(app)` | `loaders/index.ts` | Carrega handlers pós-rota |
-| `loadPostRouteMiddlewares(app)` | `loaders/express.ts` | 404 → erro; tratamento de `UnauthorizedError`; handler final 500 |
+| `loadPostRouteMiddlewares(app)` | `loaders/express.ts` | 404 → erro; handler final (5xx genérico em produção + log) |
 
 ---
 

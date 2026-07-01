@@ -25,6 +25,12 @@ const num = (v: string | undefined, def: number) => {
 
 const bool = (v: string | undefined) => v === "true" || v === "1";
 
+type SameSite = "lax" | "strict" | "none";
+const sameSite = (v: string | undefined): SameSite => {
+    const s = (v || "").toLowerCase();
+    return s === "strict" || s === "none" ? s : "lax";
+};
+
 export const env = {
     PORT: process.env.PORT,
     APP_NAME: process.env.APP_NAME || "base_node_pg",
@@ -69,6 +75,26 @@ export const env = {
 
     AUTHORIZATION: Number(process?.env?.AUTHORIZATION || 0),
     JWT_SECRET: process.env.JWT_SECRET,
+    // TTL do JWT de usuário — sem mecanismo de revogação, mantenha curto
+    JWT_EXPIRES_IN_SECONDS: num(process.env.JWT_EXPIRES_IN_SECONDS, 604_800), // 7 dias
+    // TTL do JWT de serviço (POST /auth/create-jwt)
+    SERVICE_JWT_EXPIRES_IN_SECONDS: num(process.env.SERVICE_JWT_EXPIRES_IN_SECONDS, 2_592_000), // 30 dias
+
+    // ─── Segurança HTTP ───
+    // Origens permitidas no CORS, separadas por vírgula. Vazio em produção = nenhuma origem cross-site.
+    CORS_ORIGINS: process.env.CORS_ORIGINS,
+    // Domain do cookie de auth. Vazio = host-only (recomendado).
+    COOKIE_DOMAIN: process.env.COOKIE_DOMAIN,
+    // lax (default) | strict | none — "none" exige HTTPS e defesa CSRF própria
+    COOKIE_SAMESITE: sameSite(process.env.COOKIE_SAMESITE),
+    // Nº de proxies confiáveis à frente da app (1 atrás de nginx/traefik). Necessário p/ req.ip correto no rate limit.
+    TRUST_PROXY: num(process.env.TRUST_PROXY, 0),
+    // Rate limit global (por IP)
+    RATE_LIMIT_WINDOW_MS: num(process.env.RATE_LIMIT_WINDOW_MS, 60_000),
+    RATE_LIMIT_MAX: num(process.env.RATE_LIMIT_MAX, 300),
+    // Rate limit do login (por IP, conta apenas tentativas falhas)
+    RATE_LIMIT_LOGIN_WINDOW_MS: num(process.env.RATE_LIMIT_LOGIN_WINDOW_MS, 60_000),
+    RATE_LIMIT_LOGIN_MAX: num(process.env.RATE_LIMIT_LOGIN_MAX, 5),
 
     DISCORD_WEBHOOK: process.env.DISCORD_WEBHOOK,
 

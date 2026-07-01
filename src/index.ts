@@ -100,4 +100,10 @@ async function startServer() {
 	});
 }
 
-startServer();
+// Falha de boot (config inválida, banco indisponível) precisa ser visível no
+// console/orquestrador e derrubar o processo — sem o catch, a rejeição iria
+// silenciosa para o rejections log do Winston e o processo ficaria vivo sem listen.
+startServer().catch((err) => {
+	console.error("Fatal boot error:", err instanceof Error ? err.message : err);
+	process.exit(1);
+});

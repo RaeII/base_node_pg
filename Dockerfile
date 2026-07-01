@@ -10,8 +10,11 @@ RUN bun install --frozen-lockfile
 COPY . .
 RUN bun run build
 
-RUN mkdir -p logs
+RUN mkdir -p logs && chown -R bun:bun /app
 
 ENV NODE_ENV=production
+
+# Container roda como usuário sem privilégios (imagem oven/bun já traz o user `bun`)
+USER bun
 
 CMD ["bun", "start"]

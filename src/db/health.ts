@@ -33,9 +33,13 @@ export async function healthCheck(): Promise<HealthCheckResult> {
             detail: { ms, write, read },
         };
     } catch (err) {
+        // Mensagem crua do driver pode expor host/usuário do banco — vai só pro log.
+        logger.error("Health check failed", {
+            error: err instanceof Error ? err.message : String(err),
+        });
         return {
             status: "down",
-            detail: { error: err instanceof Error ? err.message : String(err) },
+            detail: { error: "database unreachable" },
         };
     }
 }
