@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "cd /Users/israel/dev/base_node_pg && npx tsc --noEmit 2>&1 | head -30"
+            "command": "cd /var/www/base_node_pg && npx tsc --noEmit 2>&1 | head -30"
           }
         ]
       }
