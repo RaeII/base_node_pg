@@ -72,7 +72,7 @@ Cria uma conta de usuário comum e define o cookie JWT. **Sem** middleware de au
 ```
 
 - `username` — obrigatório, 3–45, normalizado para minúsculas.
-- `email` — opcional, ≤45, formato email, normalizado para minúsculas.
+- `email` — obrigatório, ≤45, formato email, normalizado para minúsculas.
 - `password` — obrigatório, 8–72.
 - Schema é `.strict()` e rejeita `is_admin`, `is_active` ou qualquer campo extra.
 - O servidor força `is_active: true` e `is_admin: false`; cadastro público nunca cria admin.

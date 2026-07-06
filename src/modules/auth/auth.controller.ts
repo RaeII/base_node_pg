@@ -152,7 +152,7 @@ class AuthController extends Controller {
 
   @Post("/signup")
   @Middleware(signupRateLimiter)
-  @ApiSummary("Signup", "Cria uma conta de usuário comum e retorna um cookie JWT.")
+  @ApiSummary("Signup", "Cria uma conta de usuário comum com email obrigatório e retorna um cookie JWT.")
   @ApiBody(signupSchema, "Dados para cadastro")
   @ApiResponse(201, "Cadastro realizado com sucesso", signupResponseSchema)
   @ApiResponse(400, "Dados inválidos", loginErrorResponseSchema)

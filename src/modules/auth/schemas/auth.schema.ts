@@ -65,6 +65,14 @@ export const signupSchema = createUserSchema
     email: true,
     password: true,
   })
+  .extend({
+    email: z
+      .string({ error: "email é obrigatório" })
+      .trim()
+      .toLowerCase()
+      .max(45, "email deve ter no máximo 45 caracteres")
+      .email("email inválido"),
+  })
   .strict();
 
 export type SignupSchema = z.infer<typeof signupSchema>;

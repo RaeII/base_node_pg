@@ -83,7 +83,7 @@ Boilerplate de API REST com **TypeScript + Express 5 + PostgreSQL**, executado c
 | Método | Rota | Auth | Descrição |
 | --- | --- | --- | --- |
 | `POST` | `/api/auth/login` | Rate limit | Login → cookie `token_access` |
-| `POST` | `/api/auth/signup` | Rate limit | Cadastro de usuário comum → cookie `token_access` |
+| `POST` | `/api/auth/signup` | Rate limit | Cadastro de usuário comum com email obrigatório → cookie `token_access` |
 | `POST` | `/api/auth/logout` | — | Remove o cookie de autenticação |
 | `POST` | `/api/auth/create-jwt` | JWT + Admin | Gera JWT de serviço (`type: "service"`) |
 | `GET` | `/api/user/` | JWT + Admin | Listar usuários (paginado) |
