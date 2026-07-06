@@ -56,7 +56,7 @@ Chamado automaticamente por `handleError`/`throwInternal` (ver [[tratamento-de-e
 
 ### Auditoria de autenticação
 
-O módulo auth registra no Winston: `Login success` (`userId`, `ip`), `Login failed` (`ip`) e `Service JWT issued` (`name`, `issuedBy`). Nunca logue senha, hash ou token — ver [[seguranca]].
+O módulo auth registra no Winston: `Login success` (`userId`, `ip`), `Login failed` (`ip`), `Signup success` (`userId`, `ip`) e `Service JWT issued` (`name`, `issuedBy`). Nunca logue senha, hash ou token — ver [[seguranca]].
 
 ---
 

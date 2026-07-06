@@ -18,7 +18,7 @@ CRUD completo com paginação, transações PostgreSQL (`withTransaction`) e sof
 
 | Arquivo | Responsabilidade |
 | --- | --- |
-| `user.controller.ts` | Rotas HTTP, validação, transações |
+| `user.controller.ts` | Rotas HTTP, validação, transações; expõe `createUser()` para o signup do [[auth]] reaproveitar a criação |
 | `user.service.ts` | Regras de negócio (unicidade, hash de senha) |
 | `user.database.ts` | Queries SQL (estende `Database`) |
 | `schema/user.schema.ts` | Schemas Zod (entrada, banco e resposta) |
@@ -65,7 +65,7 @@ O path param `:id` é validado com `idParamsSchema` (`parseSchema(idParamsSchema
 
 ## Regras de negócio (Service)
 
-- **Criação:** valida unicidade de `username` e `email`; faz hash com `bcrypt` (12 rounds); `INSERT` com `{ noRetry: true }` (não-idempotente). `username`/`email` são normalizados para **minúsculas** no schema (unicidade case-insensitive na prática).
+- **Criação:** valida unicidade de `username` e `email`; faz hash com `bcrypt` (12 rounds); `INSERT` com `{ noRetry: true }` (não-idempotente). `username`/`email` são normalizados para **minúsculas** no schema (unicidade case-insensitive na prática). O helper `UserController.createUser()` centraliza a transação para `POST /api/user/` e `POST /api/auth/signup`.
 - **Senha:** mínimo 8, máximo **72** caracteres (bcrypt trunca silenciosamente acima de 72 bytes).
 - **Atualização:** parcial — só os campos enviados; revalida unicidade ao trocar `username`/`email`; refaz o hash se a senha vier.
 - **Corrida de unicidade:** o check no service é UX; quem garante é a constraint UNIQUE do banco. Se a corrida acontecer, o `23505` vira `409` no `handleError` ([[tratamento-de-erros]]).
@@ -99,7 +99,7 @@ Definidos em `schema/user.schema.ts` (ver [[schemas-zod]]):
 
 ## Relacionado
 
-- [[auth|Módulo Auth]] — usa `UserService.authenticate()` no login
+- [[auth|Módulo Auth]] — usa `UserService.authenticate()` no login e `UserController.createUser()` no signup
 - [[paginacao|Paginação]] — `paginationMiddleware`, `paginatedResponse`
 - [[camada-de-acesso|Camada de Acesso a Dados]] — `Database`, `withTransaction`, `{ noRetry }`
 - [[novo-modulo|Criar Novo Módulo]] — use este módulo como referência

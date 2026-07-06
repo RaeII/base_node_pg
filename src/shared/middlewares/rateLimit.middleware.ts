@@ -31,3 +31,17 @@ export const loginRateLimiter = rateLimit({
   legacyHeaders: false,
   message: { message: "Muitas tentativas de login — aguarde antes de tentar novamente" },
 });
+
+/**
+ * Rate limit do cadastro — reduz abuso de criação de contas por IP.
+ * Usa a mesma janela/limite do login, mas conta tentativas bem-sucedidas também.
+ *
+ * Uso: `@Middleware(signupRateLimiter)` na rota de cadastro público.
+ */
+export const signupRateLimiter = rateLimit({
+  windowMs: env.RATE_LIMIT_LOGIN_WINDOW_MS,
+  limit: env.RATE_LIMIT_LOGIN_MAX,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Muitas tentativas de cadastro — aguarde antes de tentar novamente" },
+});

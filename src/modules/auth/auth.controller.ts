@@ -5,18 +5,22 @@ import { Controller as Route, Post, Middleware } from "@/shared/core/decorators"
 import { ApiBody, ApiResponse, ApiSummary, ApiTags } from "@/shared/core/decorators/index";
 import { env } from "@/config";
 import UserService from "@/modules/user/user.service";
+import UserController from "@/modules/user/user.controller";
+import type { PublicUser } from "@/modules/user/schema/user.schema";
 import {
   loginSchema,
+  signupSchema,
   createJwtBodySchema,
   createJwtResponseSchema,
   errorResponseSchema,
   loginResponseSchema,
+  signupResponseSchema,
   loginErrorResponseSchema,
   logoutResponseSchema,
 } from "@/modules/auth/schemas/auth.schema";
 import jwtMiddleware from "@/shared/middlewares/jwt.middleware";
 import adminMiddleware from "@/shared/middlewares/admin.middleware";
-import { loginRateLimiter } from "@/shared/middlewares/rateLimit.middleware";
+import { loginRateLimiter, signupRateLimiter } from "@/shared/middlewares/rateLimit.middleware";
 import { parseSchema, handleError, AppError } from "@/shared/utils/error";
 import logger from "@/shared/utils/logger";
 
@@ -41,10 +45,31 @@ function authCookieOptions(maxAgeSeconds?: number): CookieOptions {
 @ApiTags("Autenticação")
 class AuthController extends Controller {
   private userService: UserService;
+  private userController: UserController;
 
   constructor() {
     super();
     this.userService = new UserService();
+    this.userController = new UserController();
+  }
+
+  private issueUserAuthCookie(res: Response, user: PublicUser): number {
+    const jwtSecret = env.JWT_SECRET as string; // garantido no boot (loaders)
+    const expiresIn = env.JWT_EXPIRES_IN_SECONDS;
+
+    const payload = {
+      sub: String(user.id),
+      userId: user.id,
+      username: user.username,
+      email: user.email,
+      admin: user.is_admin,
+      type: "user",
+    };
+
+    const token = jwt.sign(payload, jwtSecret, { expiresIn, issuer: env.APP_NAME });
+    res.cookie("token_access", token, authCookieOptions(expiresIn));
+
+    return expiresIn;
   }
 
   @Post("/create-jwt")
@@ -108,21 +133,7 @@ class AuthController extends Controller {
         password: data.password,
       });
 
-      const jwtSecret = env.JWT_SECRET as string; // garantido no boot (loaders)
-      const expiresIn = env.JWT_EXPIRES_IN_SECONDS;
-
-      const payload = {
-        sub: String(user.id),
-        userId: user.id,
-        username: user.username,
-        email: user.email,
-        admin: user.is_admin,
-        type: "user",
-      };
-
-      const token = jwt.sign(payload, jwtSecret, { expiresIn, issuer: env.APP_NAME });
-
-      res.cookie("token_access", token, authCookieOptions(expiresIn));
+      const expiresIn = this.issueUserAuthCookie(res, user);
 
       // Auditoria de acesso (nunca logar senha/token)
       logger.info("Login success", { userId: user.id, ip: req.ip });
@@ -135,6 +146,39 @@ class AuthController extends Controller {
       if (err instanceof AppError && err.statusCode === 401) {
         logger.warn("Login failed", { ip: req.ip });
       }
+      return handleError(err, res);
+    }
+  }
+
+  @Post("/signup")
+  @Middleware(signupRateLimiter)
+  @ApiSummary("Signup", "Cria uma conta de usuário comum e retorna um cookie JWT.")
+  @ApiBody(signupSchema, "Dados para cadastro")
+  @ApiResponse(201, "Cadastro realizado com sucesso", signupResponseSchema)
+  @ApiResponse(400, "Dados inválidos", loginErrorResponseSchema)
+  @ApiResponse(409, "Username ou e-mail já está em uso", errorResponseSchema)
+  async signup(req: Request, res: Response) {
+    try {
+      const data = parseSchema(signupSchema, req.body);
+
+      const user = await this.userController.createUser({
+        username: data.username,
+        email: data.email,
+        password: data.password,
+        is_active: true,
+        is_admin: false,
+      });
+
+      const expiresIn = this.issueUserAuthCookie(res, user);
+
+      // Auditoria de cadastro (nunca logar senha/token)
+      logger.info("Signup success", { userId: user.id, ip: req.ip });
+
+      return res.status(201).json({
+        data: user,
+        expiresIn,
+      });
+    } catch (err) {
       return handleError(err, res);
     }
   }

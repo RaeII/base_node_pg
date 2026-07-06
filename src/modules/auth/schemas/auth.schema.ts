@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { createUserSchema, publicUserSchema } from "@/modules/user/schema/user.schema";
 
 const optionalTrimmedString = () =>
   z
@@ -57,6 +58,17 @@ export type LoginSchema = z.infer<typeof loginSchema>;
 
 // ─── Schemas de Body ────────────────────────────────────────────
 
+/** Schema de body para cadastro público de usuário comum */
+export const signupSchema = createUserSchema
+  .pick({
+    username: true,
+    email: true,
+    password: true,
+  })
+  .strict();
+
+export type SignupSchema = z.infer<typeof signupSchema>;
+
 /** Schema de body para geração de token JWT de serviço */
 export const createJwtBodySchema = z
   .object({
@@ -85,15 +97,12 @@ export const errorResponseSchema = z.object({
 
 /** Schema de resposta de sucesso ao fazer login (200) */
 export const loginResponseSchema = z.object({
-  data: z.object({
-    id: z.number(),
-    username: z.string(),
-    email: z.string().nullable(),
-    is_active: z.boolean(),
-    is_admin: z.boolean(),
-  }),
+  data: publicUserSchema,
   expiresIn: z.number(),
 });
+
+/** Schema de resposta de sucesso ao cadastrar usuário */
+export const signupResponseSchema = loginResponseSchema;
 
 /** Schema de resposta do logout (200) */
 export const logoutResponseSchema = z.object({

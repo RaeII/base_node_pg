@@ -56,7 +56,7 @@ base_node_pg/
 │       ├── middlewares/
 │       │   ├── jwt.middleware.ts         # Valida JWT do cookie (HS256 + issuer)
 │       │   ├── admin.middleware.ts       # Verifica claim admin (=== true estrito)
-│       │   └── rateLimit.middleware.ts   # globalRateLimiter + loginRateLimiter
+│       │   └── rateLimit.middleware.ts   # globalRateLimiter + loginRateLimiter + signupRateLimiter
 │       └── utils/                        # Funções globais (ver [[funcoes-globais]])
 │           ├── error.ts                  # AppError, throwUser, throwInternal, parseSchema, handleError
 │           ├── pagination.ts             # Middleware e helpers de paginação (ALS)

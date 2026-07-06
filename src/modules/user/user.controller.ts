@@ -12,6 +12,8 @@ import {
   messageResponseSchema,
   validationErrorResponseSchema,
   idParamsSchema,
+  type CreateUserInput,
+  type PublicUser,
 } from "@/modules/user/schema/user.schema";
 import jwtMiddleware from "@/shared/middlewares/jwt.middleware";
 import adminMiddleware from "@/shared/middlewares/admin.middleware";
@@ -28,6 +30,18 @@ class UserController extends Controller {
   constructor() {
     super();
     this.userService = new UserService();
+  }
+
+  async createUser(data: CreateUserInput): Promise<PublicUser> {
+    return await withTransaction(async () => {
+      return await this.userService.createUser({
+        username: data.username,
+        email: data.email,
+        password: data.password,
+        is_active: data.is_active,
+        is_admin: data.is_admin,
+      });
+    });
   }
 
   @Get("/")
@@ -82,15 +96,7 @@ class UserController extends Controller {
     try {
       const data = parseSchema(createUserSchema, req.body);
 
-      const created = await withTransaction(async () => {
-        return await this.userService.createUser({
-          username: data.username,
-          email: data.email,
-          password: data.password,
-          is_active: data.is_active,
-          is_admin: data.is_admin,
-        });
-      });
+      const created = await this.createUser(data);
 
       return res.status(201).json({
         data: created,

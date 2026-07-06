@@ -13,7 +13,7 @@ Autenticação de usuários e geração de tokens JWT.
 **Pasta:** [`src/modules/auth/`](../../../src/modules/auth/) — `auth.controller.ts` + `schemas/auth.schema.ts`.
 
 > [!note] Depende do módulo de usuários
-> O login usa `UserService.authenticate()`. Ver [[usuarios|Módulo Usuários]].
+> O login usa `UserService.authenticate()`; o signup reutiliza `UserController.createUser()` para criar usuário comum em transação. Ver [[usuarios|Módulo Usuários]].
 
 ---
 
@@ -58,6 +58,42 @@ Autentica e define o cookie JWT. **Sem** middleware de auth, mas com **rate limi
 { sub: string, userId: number, username: string, email: string|null, admin: boolean, type: "user" }
 // iat / exp / iss gerados pelo jsonwebtoken (issuer = APP_NAME)
 ```
+
+---
+
+### POST `/api/auth/signup`
+
+Cria uma conta de usuário comum e define o cookie JWT. **Sem** middleware de auth, mas com **rate limit dedicado** (`signupRateLimiter` — default 5 tentativas/min por IP; ver [[seguranca]]).
+
+**Body** (`signupSchema`) — apenas campos públicos:
+
+```json
+{ "username": "maria", "email": "maria@x.com", "password": "senha1234" }
+```
+
+- `username` — obrigatório, 3–45, normalizado para minúsculas.
+- `email` — opcional, ≤45, formato email, normalizado para minúsculas.
+- `password` — obrigatório, 8–72.
+- Schema é `.strict()` e rejeita `is_admin`, `is_active` ou qualquer campo extra.
+- O servidor força `is_active: true` e `is_admin: false`; cadastro público nunca cria admin.
+
+**Response 201:**
+
+```json
+{
+  "data": {
+    "id": 2, "username": "maria", "email": "maria@x.com",
+    "is_active": true, "is_admin": false,
+    "last_login_at": null,
+    "created_at": "…", "updated_at": null
+  },
+  "expiresIn": 604800
+}
+```
+
+`expiresIn`, cookie `token_access` e payload JWT seguem o mesmo padrão do login (`type: "user"`, `admin: false`, issuer `APP_NAME`).
+
+**Erros:** `400` (validação), `409` (username/e-mail duplicado), `429` (rate limit).
 
 ---
 
@@ -118,9 +154,11 @@ Proteções aplicadas neste módulo (detalhes e racional em [[seguranca]]):
 
 - **Anti-enumeração + anti-timing** — inexistente, senha errada e inativo respondem o mesmo `401`; usuário inexistente compara contra hash dummy para igualar o tempo de resposta.
 - **Rate limit no login** — `loginRateLimiter`, conta só tentativas falhas.
+- **Rate limit no signup** — `signupRateLimiter`, conta tentativas bem-sucedidas e falhas para reduzir criação abusiva de contas.
+- **Cadastro público sem admin** — `signupSchema` não aceita flags administrativas e o controller força `is_admin: false`.
 - **JWT endurecido** — `algorithms: ["HS256"]` + `issuer` fixos na verificação; claim `type` distingue token de usuário e de serviço; `JWT_SECRET` mínimo de 32 chars validado no boot.
 - **Cookie endurecido** — `httpOnly`, `secure` em produção, `sameSite=lax` por default (defesa CSRF), host-only por default. Atributos centralizados em `authCookieOptions()`.
-- **Auditoria** — sucesso/falha de login e emissão de token de serviço vão para o Winston (nunca senha/token).
+- **Auditoria** — sucesso/falha de login, sucesso de signup e emissão de token de serviço vão para o Winston (nunca senha/token).
 - **Leitura de cookie via `cookie-parser`** — registrado nos loaders pré-rota; sem ele `req.cookies` seria `undefined` e o JWT nunca seria lido. Ver [[middlewares-auth]].
 
 > [!tip] Antes de produção
@@ -132,6 +170,6 @@ Proteções aplicadas neste módulo (detalhes e racional em [[seguranca]]):
 
 - [[seguranca|Segurança]] — convenções globais (cookie, CORS, rate limit, JWT)
 - [[middlewares-auth|Middlewares de Autenticação]]
-- [[usuarios|Módulo Usuários]] — `authenticate()` e `is_admin`
-- [[schemas-zod|Schemas Zod]] — `loginSchema`, `createJwtBodySchema`
+- [[usuarios|Módulo Usuários]] — `authenticate()`, `createUser()` e `is_admin`
+- [[schemas-zod|Schemas Zod]] — `loginSchema`, `signupSchema`, `createJwtBodySchema`
 - [[tratamento-de-erros|Tratamento de Erros]] — `parseSchema`, `handleError`

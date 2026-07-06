@@ -45,6 +45,7 @@ Registrados em `src/shared/loaders/express.ts`, **antes** das rotas, nesta ordem
 | --- | --- | --- | --- |
 | `globalRateLimiter` | Toda a API (aplicado nos loaders) | 300 req/min por IP | `RATE_LIMIT_WINDOW_MS` / `RATE_LIMIT_MAX` |
 | `loginRateLimiter` | `POST /auth/login` | 5 falhas/min por IP | `skipSuccessfulRequests: true` — só tentativas **falhas** contam |
+| `signupRateLimiter` | `POST /auth/signup` | 5 tentativas/min por IP | Conta sucesso e falha — reduz criação abusiva de contas |
 
 > [!tip] Endpoint novo sensível a brute-force?
 > Login, reset de senha, verificação de código, etc. → crie um limiter dedicado no mesmo arquivo e aplique com `@Middleware(meuLimiter)`. Não confie só no limite global.
@@ -67,7 +68,7 @@ Os atributos do cookie são centralizados em `authCookieOptions()` (`auth.contro
 
 - Assinado e verificado com `algorithms: ["HS256"]` + `issuer: APP_NAME` fixos (evita confusão de algoritmo e tokens de outra app com o mesmo secret).
 - **Dois tipos de token**, distinguidos pelo claim `type`:
-  - `type: "user"` (login) — carrega `sub`, `userId`, `username`, `email`, `admin`. TTL `JWT_EXPIRES_IN_SECONDS` (default 7 dias).
+  - `type: "user"` (login/signup) — carrega `sub`, `userId`, `username`, `email`, `admin`. TTL `JWT_EXPIRES_IN_SECONDS` (default 7 dias). Signup força `admin: false`.
   - `type: "service"` (`POST /auth/create-jwt`) — carrega só `name`. **Não tem claim `admin`**, então nunca passa no `adminMiddleware`. TTL `SERVICE_JWT_EXPIRES_IN_SECONDS` (default 30 dias).
 - `adminMiddleware` só aceita `admin === true` **estrito** (boolean assinado pela própria app).
 
@@ -84,7 +85,8 @@ Regras implementadas em `UserService.authenticate()` — **preserve-as ao adapta
 - **Anti-timing:** quando o usuário não existe, compara contra `DUMMY_PASSWORD_HASH` — a resposta demora o mesmo que uma senha errada (sem isso, o tempo de resposta revela quais logins existem).
 - **Senha:** bcrypt custo 12. Política: mínimo 8, **máximo 72** (bcrypt trunca silenciosamente acima de 72 bytes).
 - **Normalização:** `username`/`email` são convertidos para minúsculas nos schemas de criação/atualização e no identifier do login (o banco compara case-sensitive).
-- **Auditoria:** login com sucesso → `logger.info("Login success", { userId, ip })`; falha 401 → `logger.warn("Login failed", { ip })`; emissão de token de serviço → `logger.info("Service JWT issued", ...)`. Nunca logue senha, hash ou token.
+- **Cadastro público:** `signupSchema` aceita só `username`, `email` e `password`; o controller força `is_active: true` e `is_admin: false`.
+- **Auditoria:** login com sucesso → `logger.info("Login success", { userId, ip })`; falha 401 → `logger.warn("Login failed", { ip })`; signup com sucesso → `logger.info("Signup success", { userId, ip })`; emissão de token de serviço → `logger.info("Service JWT issued", ...)`. Nunca logue senha, hash ou token.
 
 ---
 
@@ -117,7 +119,7 @@ Complementa o checklist de [[novo-modulo]]:
 | `COOKIE_SAMESITE` | `lax` | `lax` · `strict` · `none` |
 | `TRUST_PROXY` | `0` | Nº de proxies confiáveis (1 atrás de nginx) |
 | `RATE_LIMIT_WINDOW_MS` / `RATE_LIMIT_MAX` | `60000` / `300` | Limite global por IP |
-| `RATE_LIMIT_LOGIN_WINDOW_MS` / `RATE_LIMIT_LOGIN_MAX` | `60000` / `5` | Limite do login (só falhas) |
+| `RATE_LIMIT_LOGIN_WINDOW_MS` / `RATE_LIMIT_LOGIN_MAX` | `60000` / `5` | Limite do login (só falhas) e do signup (sucesso + falha) |
 
 ---
 
