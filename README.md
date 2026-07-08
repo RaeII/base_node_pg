@@ -45,15 +45,19 @@ Boilerplate moderno e opinado para construir APIs RESTful com **TypeScript + Exp
 > **Pré-requisitos:** [Bun](https://bun.sh) instalado e um **PostgreSQL** acessível.
 
 ```bash
+PROJECT=ratiou-back
 # 1. Clonar o template em uma nova pasta
-git clone git@github.com:RaeII/base_node_pg.git meu-projeto
-cd meu-projeto
+git clone git@github.com:RaeII/base_node_pg.git "$PROJECT"
+cd "$PROJECT" || exit 1
 
-# 2. Começar um histórico git limpo
-rm -rf .git && git init -b main && git add . && git commit -m "feat: init"
+# Começar um histórico git limpo
+rm -rf .git
+git init -b main
+git add .
+git commit -m "feat: init"
 
 # 3. Criar o repositório no GitHub e subir automaticamente
-gh repo create cidoa-back --private --source=. --push
+gh repo create "$(basename "$PWD")" --private --source=. --push
 
 # 5. Instalar dependências
 bun install
