@@ -52,13 +52,16 @@ cd meu-projeto
 # 2. Começar um histórico git limpo
 rm -rf .git && git init -b main && git add . && git commit -m "feat: init"
 
-# 3. Instalar dependências
+# 3. Criar o repositório no GitHub e subir automaticamente
+gh repo create cidoa-back --private --source=. --push
+
+# 5. Instalar dependências
 bun install
 
-# 4. Configurar variáveis de ambiente
+# 6. Configurar variáveis de ambiente
 cp .env.example .env      # preencha PORT, JWT_SECRET, DB_* etc.
 
-# 6. Rodar em desenvolvimento (hot-reload)
+# 7. Rodar em desenvolvimento (hot-reload)
 bun dev
 ```
 
