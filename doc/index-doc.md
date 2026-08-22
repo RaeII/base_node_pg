@@ -105,5 +105,6 @@ Boilerplate de API REST com **TypeScript + Express 5 + PostgreSQL**, executado c
 - **Validação total de input**: body **e path params** via `parseSchema` (ex.: `idParamsSchema` para `:id`). Veja [[seguranca]].
 - **Erros**: `throwUser` (vai ao cliente) vs `throwInternal` (loga + Discord, com throttle). Veja [[tratamento-de-erros]].
 - **Transações**: mutações multi-tabela ficam dentro de `withTransaction(...)` no controller. Veja [[camada-de-acesso]].
+- **Health do pool**: pool de leitura ainda não utilizado (`totalCount=0`) é saudável; só há saturação sem conexões ociosas quando ele já possui conexões.
 - **Segurança**: checklist obrigatório para módulos novos em [[seguranca#Regras para módulos novos (checklist de segurança)]].
 - **Alias de import**: `@/*` aponta para `src/*` (configurado no `tsconfig.json`).

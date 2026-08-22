@@ -25,7 +25,7 @@ export async function healthCheck(): Promise<HealthCheckResult> {
 
         const degraded =
             write.waitingCount > 0 || write.idleCount === 0 ||
-            read.waitingCount  > 0 || read.idleCount  === 0 ||
+            read.waitingCount  > 0 || (read.totalCount > 0 && read.idleCount === 0) ||
             ms > 1_000;
 
         return {

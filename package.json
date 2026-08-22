@@ -22,6 +22,7 @@
     "helmet": "^8.2.0",
     "jsonwebtoken": "^9.0.3",
     "moment": "^2.30.1",
+    "moment-timezone": "^0.6.2",
     "pg": "^8.13.1",
     "pg-cursor": "^2.12.1",
     "reflect-metadata": "^0.2.2",

@@ -45,7 +45,7 @@ Boilerplate moderno e opinado para construir APIs RESTful com **TypeScript + Exp
 > **Pré-requisitos:** [Bun](https://bun.sh) instalado e um **PostgreSQL** acessível.
 
 ```bash
-PROJECT=ratiou-back
+PROJECT=pixyou-back
 # 1. Clonar o template em uma nova pasta
 git clone git@github.com:RaeII/base_node_pg.git "$PROJECT"
 cd "$PROJECT" || exit 1
