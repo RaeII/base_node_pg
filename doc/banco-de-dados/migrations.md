@@ -47,13 +47,15 @@ Prefixo numérico crescente — execução em ordem lexicográfica:
 ```
 0000_setup_roles.sql
 0001_initial_user.sql
-0002_add_orders.sql
+0002_auth_session.sql
+0003_admin.sql
+0004_add_orders.sql
 ```
 
 ### Imutabilidade
 
 > [!danger] Migration aplicada NÃO se edita
-> O runner recalcula o SHA-256 e aborta se o conteúdo mudou. Para alterar o schema, crie um **novo** arquivo (`0003_alter_users.sql`). Migrations são histórico imutável.
+> O runner recalcula o SHA-256 e aborta se o conteúdo mudou. Para alterar o schema, crie um **novo** arquivo (`0004_alter_users.sql`). Migrations são histórico imutável.
 
 ### Idempotência defensiva
 

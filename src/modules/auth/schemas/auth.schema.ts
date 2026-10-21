@@ -90,6 +90,34 @@ export const createJwtBodySchema = z
 
 export type CreateJwtBody = z.infer<typeof createJwtBodySchema>;
 
+// ─── Refresh token ──────────────────────────────────────────────
+
+/**
+ * Cookie `token_refresh`: `<uuid da sessão>.<segredo base64url de 32 bytes>`.
+ * Formato estrito: um UUID malformado chegaria ao PG como erro 22P02 (500).
+ */
+export const refreshTokenSchema = z
+  .string()
+  .max(100)
+  .regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.[\w-]{43}$/)
+  .transform((value) => {
+    const [id, secret] = value.split(".");
+    return { id, secret };
+  });
+
+export type RefreshToken = z.infer<typeof refreshTokenSchema>;
+
+/** Linha de `auth_session` + flags calculadas no relógio do banco. */
+export interface DbAuthSessionRow {
+  id: string;
+  user_id: string; // BIGINT — o driver pg devolve como string
+  token_hash: string;
+  previous_token_hash: string | null;
+  revoked_at: Date | null;
+  expired: boolean;
+  in_grace: boolean;
+}
+
 // ─── Schemas de Resposta (documentação Swagger) ─────────────────
 
 /** Schema de resposta de sucesso ao gerar JWT (200) */
@@ -111,6 +139,14 @@ export const loginResponseSchema = z.object({
 
 /** Schema de resposta de sucesso ao cadastrar usuário */
 export const signupResponseSchema = loginResponseSchema;
+
+/** Schema de resposta do refresh (200) — mesmo formato do login */
+export const refreshResponseSchema = loginResponseSchema;
+
+/** Schema de resposta de GET /auth/me (200) */
+export const meResponseSchema = z.object({
+  data: publicUserSchema,
+});
 
 /** Schema de resposta do logout (200) */
 export const logoutResponseSchema = z.object({

@@ -1,6 +1,6 @@
 import Database from "@/shared/infra/database/Database";
 import { getPagination } from "@/shared/utils/pagination";
-import type { CreateUserDbInput, DbUserAuthRow, DbUserRow, UpdateUserDbInput } from "./schema/user.schema";
+import type { CreateUserDbInput, DbUserAuthRow, DbUserRow, ListUsersQuery, UpdateUserDbInput } from "./schema/user.schema";
 
 // Projeção explícita SEM a coluna password — o hash só sai do banco no fluxo
 // de autenticação (findByUsernameOrEmail). Nunca use SELECT * nesta tabela.
@@ -9,20 +9,23 @@ const USER_COLUMNS = `id, username, email, is_active, is_admin, last_login_at, c
 export default class UserDatabase extends Database {
 
   /**
-   * Retorna usuários ativos com paginação em uma única query.
+   * Retorna usuários com paginação e filtros em uma única query.
    * `COUNT(*) OVER ()` adiciona o total à projeção sem segundo round-trip.
    * Os parâmetros limit/offset são obtidos automaticamente via AsyncLocalStorage.
    */
-  async findAll(): Promise<{ rows: DbUserRow[]; total: number }> {
+  async findAll(filters: ListUsersQuery): Promise<{ rows: DbUserRow[]; total: number }> {
     const { limit, offset } = getPagination();
+    // Busca parcial: escapa os curingas do ILIKE para o input ser literal.
+    const pattern = filters.search ? `%${filters.search.replace(/[\\%_]/g, "\\$&")}%` : null;
 
     const result = await this.query<DbUserRow & { _total: string }>(
       `SELECT ${USER_COLUMNS}, COUNT(*) OVER () AS _total
          FROM "user"
-        WHERE is_active = TRUE
+        WHERE ($3::text = 'all' OR is_active = ($3::text = 'active'))
+          AND ($4::text IS NULL OR username ILIKE $4 OR email ILIKE $4)
         ORDER BY id ASC
         LIMIT $1 OFFSET $2`,
-      [limit, offset]
+      [limit, offset, filters.status, pattern]
     );
 
     const rawRows = result.rows;

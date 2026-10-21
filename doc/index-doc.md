@@ -32,7 +32,7 @@ Boilerplate de API REST com **TypeScript + Express 5 + PostgreSQL**, executado c
 | Linguagem | TypeScript 5.3 (`strict`, decorators) |
 | Validação | Zod v4 (`toJSONSchema` nativo) |
 | Banco | PostgreSQL — `pg` (node-postgres, pool duplo write/read) |
-| Auth | JWT (cookie httpOnly, `sameSite=lax`) + bcrypt |
+| Auth | Access token JWT (15 min) + refresh token rotativo, ambos em cookie httpOnly (`sameSite=lax`) + bcrypt · sessão admin elevada (step-up) validada no banco |
 | Segurança HTTP | helmet + rate limit (`express-rate-limit`) + CORS por env |
 | Docs | Swagger UI / OpenAPI 3.0 (gerado dos decorators) |
 | Observabilidade | Winston (rotação diária) + alertas Discord (com throttle) |
@@ -57,9 +57,10 @@ Boilerplate de API REST com **TypeScript + Express 5 + PostgreSQL**, executado c
 
 ### 📦 Módulos
 
-- [[auth|Módulo Auth]] — login, cookie JWT, geração de token de serviço
+- [[auth|Módulo Auth]] — login, sessão (access + refresh rotativo), token de serviço
 - [[usuarios|Módulo Usuários]] — CRUD completo, paginação, soft delete
 - [[sistema|Módulo Sistema]] — health check e métricas dos pools
+- [[admin|Módulo Admin]] — área administrativa: sessão admin elevada, painel, sistema, auditoria
 
 ### 🌐 Funções Globais
 
@@ -78,19 +79,28 @@ Boilerplate de API REST com **TypeScript + Express 5 + PostgreSQL**, executado c
 ## Endpoints
 
 > [!warning] Autorização
+> **JWT + Admin** = access token válido **e** sessão admin elevada (login em `/api/auth/admin/login`), checada no banco a cada request — ver [[admin]].
 > As rotas protegidas só são efetivamente bloqueadas quando `AUTHORIZATION=1` no `.env`. Com `AUTHORIZATION=0` os middlewares deixam passar — útil em dev. **Em produção o boot falha se `AUTHORIZATION != 1`** (fail-closed — ver [[seguranca]]).
 
 | Método | Rota | Auth | Descrição |
 | --- | --- | --- | --- |
-| `POST` | `/api/auth/login` | Rate limit | Login → cookie `token_access` |
-| `POST` | `/api/auth/signup` | Rate limit | Cadastro de usuário comum com email obrigatório → cookie `token_access` |
-| `POST` | `/api/auth/logout` | — | Remove o cookie de autenticação |
+| `POST` | `/api/auth/login` | Rate limit | Login → cookies `token_access` + `token_refresh` |
+| `POST` | `/api/auth/admin/login` | Rate limit | Login admin: reautentica, abre sessão nova **elevada** (15 min sem uso / 8 h máx.) |
+| `POST` | `/api/auth/signup` | Rate limit | Cadastro de usuário comum com email obrigatório → cookies de sessão |
+| `POST` | `/api/auth/refresh` | Cookie refresh | Renova a sessão (rotação do refresh token) |
+| `GET` | `/api/auth/me` | JWT | Usuário da sessão (lido do banco) |
+| `POST` | `/api/auth/logout` | — | Revoga a sessão e remove os cookies |
 | `POST` | `/api/auth/create-jwt` | JWT + Admin | Gera JWT de serviço (`type: "service"`) |
-| `GET` | `/api/user/` | JWT + Admin | Listar usuários (paginado) |
+| `GET` | `/api/user/` | JWT + Admin | Listar usuários (paginado, `?search=` e `?status=active\|inactive\|all`) |
 | `GET` | `/api/user/:id` | JWT + Admin | Buscar por ID |
-| `POST` | `/api/user/` | JWT + Admin | Criar usuário (em transação) |
-| `PUT` | `/api/user/:id` | JWT + Admin | Atualizar (parcial, em transação) |
-| `DELETE` | `/api/user/:id` | JWT + Admin | Desativar (soft delete) |
+| `POST` | `/api/user/` | JWT + Admin | Criar usuário (em transação, auditado) |
+| `PUT` | `/api/user/:id` | JWT + Admin | Atualizar (parcial, em transação, auditado) |
+| `DELETE` | `/api/user/:id` | JWT + Admin | Desativar (soft delete, auditado) |
+| `POST` | `/api/user/:id/revoke-sessions` | JWT + Admin | Encerrar todas as sessões do usuário (auditado) |
+| `GET` | `/api/admin/me` | JWT + Admin | Admin da sessão elevada (403 sem elevação) |
+| `GET` | `/api/admin/stats` | JWT + Admin | Números do painel (usuários, sessões) |
+| `GET` | `/api/admin/system` | JWT + Admin | Saúde, runtime, banco e config de segurança efetiva |
+| `GET` | `/api/admin/audit` | JWT + Admin | Trilha de auditoria (paginada) |
 | `GET` | `/api/system/health` | — | Health check em camadas (200/503 p/ probes K8s) |
 | `GET` | `/api/system/metrics` | — | Stats dos pools `write` + `read` em JSON |
 | `GET` | `/api-docs` | — | Swagger UI (apenas fora de produção) |

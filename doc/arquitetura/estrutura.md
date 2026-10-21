@@ -28,15 +28,22 @@ base_node_pg/
 │   ├── modules/                          # Domínios da aplicação
 │   │   ├── auth/
 │   │   │   ├── auth.controller.ts
+│   │   │   ├── auth.service.ts           # sessão: refresh rotativo, reuso, revogação
+│   │   │   ├── auth.database.ts          # tabela auth_session
 │   │   │   └── schemas/auth.schema.ts
 │   │   ├── user/
 │   │   │   ├── user.controller.ts
 │   │   │   ├── user.service.ts
 │   │   │   ├── user.database.ts
 │   │   │   └── schema/user.schema.ts
-│   │   └── system/
-│   │       ├── system.controller.ts
-│   │       └── schemas/system.schema.ts
+│   │   ├── system/
+│   │   │   ├── system.controller.ts
+│   │   │   └── schemas/system.schema.ts
+│   │   └── admin/                        # área administrativa (painel, sistema, auditoria)
+│   │       ├── admin.controller.ts
+│   │       ├── admin.service.ts
+│   │       ├── admin.database.ts         # tabela audit_log + agregados
+│   │       └── schema/admin.schema.ts
 │   └── shared/                           # Infraestrutura compartilhada
 │       ├── core/
 │       │   ├── Controller.ts             # Classe base dos controllers
@@ -132,8 +139,10 @@ Definidas em [`.env`](../../.env.example) e tipadas em [`src/config/index.ts`](.
 | `APP_NAME` | `application_name` enviado ao Postgres + `issuer` dos JWTs (default `base_node_pg`) |
 | `AUTHORIZATION` | `1` = JWT/admin obrigatórios · `0` = liberados (dev). **Produção exige `1` — boot falha sem** |
 | `JWT_SECRET` | Segredo para assinar/verificar tokens (obrigatório; ≥ 32 chars em produção) |
-| `JWT_EXPIRES_IN_SECONDS` | TTL do JWT de usuário (default 604 800 = 7 dias) |
+| `JWT_EXPIRES_IN_SECONDS` | TTL do access token de usuário (default 900 = 15 min) |
+| `REFRESH_TOKEN_EXPIRES_IN_SECONDS` | TTL deslizante do refresh token / sessão (default 604 800 = 7 dias) |
 | `SERVICE_JWT_EXPIRES_IN_SECONDS` | TTL do JWT de serviço (default 2 592 000 = 30 dias) |
+| `ADMIN_SESSION_IDLE_SECONDS` / `ADMIN_SESSION_MAX_SECONDS` | Sessão admin: expira sem uso (default 900 = 15 min) / teto desde o login admin (default 28 800 = 8 h) |
 | `CORS_ORIGINS` | Origens CORS separadas por vírgula (vazio em prod = nenhuma) |
 | `COOKIE_DOMAIN` / `COOKIE_SAMESITE` | Atributos do cookie de auth (default: host-only / `lax`) |
 | `TRUST_PROXY` | Nº de proxies confiáveis (necessário p/ rate limit atrás de proxy) |

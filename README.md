@@ -45,7 +45,7 @@ Boilerplate moderno e opinado para construir APIs RESTful com **TypeScript + Exp
 > **Pré-requisitos:** [Bun](https://bun.sh) instalado e um **PostgreSQL** acessível.
 
 ```bash
-PROJECT=pixyou-back
+PROJECT=licis-back
 # 1. Clonar o template em uma nova pasta
 git clone git@github.com:RaeII/base_node_pg.git "$PROJECT"
 cd "$PROJECT" || exit 1
@@ -57,7 +57,9 @@ git add .
 git commit -m "feat: init"
 
 # 3. Criar o repositório no GitHub e subir automaticamente
-gh repo create "$(basename "$PWD")" --private --source=. --push
+# gh repo create "$(basename "$PWD")" --private --source=. --push
+
+gh repo create "monkey-branch/$(basename "$PWD")" --private --source=. --push
 
 # 5. Instalar dependências
 bun install
@@ -83,16 +85,22 @@ Após iniciar, a API fica em `http://localhost:$PORT`. Swagger em `http://localh
 ## 🗂 Endpoints
 
 > As rotas protegidas só são bloqueadas com `AUTHORIZATION=1`. Com `0` os middlewares liberam o acesso — use apenas em dev.
+> **JWT + Admin** = access válido **e** sessão admin elevada (login em `/api/auth/admin/login`), validada no banco a cada request.
 
 | Método | Rota | Auth | Descrição |
 |---|---|---|---|
-| `POST` | `/api/auth/login` | — | Login → cookie `token_access` |
+| `POST` | `/api/auth/login` | — | Login → cookies `token_access` + `token_refresh` |
+| `POST` | `/api/auth/admin/login` | — | Login admin → sessão nova elevada (15 min sem uso / 8 h máx.) |
+| `POST` | `/api/auth/refresh` | Cookie refresh | Renova a sessão (rotação do refresh token) |
+| `GET` | `/api/auth/me` | JWT | Usuário da sessão |
 | `POST` | `/api/auth/create-jwt` | JWT + Admin | Gera JWT nomeado (service-to-service) |
-| `GET` | `/api/user/` | JWT + Admin | Listar usuários (paginado) |
+| `GET` | `/api/user/` | JWT + Admin | Listar usuários (paginado, `search`, `status`) |
 | `GET` | `/api/user/:id` | JWT + Admin | Buscar por ID |
 | `POST` | `/api/user/` | JWT + Admin | Criar usuário (em transação) |
 | `PUT` | `/api/user/:id` | JWT + Admin | Atualizar (parcial) |
 | `DELETE` | `/api/user/:id` | JWT + Admin | Desativar (soft delete) |
+| `POST` | `/api/user/:id/revoke-sessions` | JWT + Admin | Encerrar sessões do usuário |
+| `GET` | `/api/admin/me` · `/stats` · `/system` · `/audit` | JWT + Admin | Área admin: sessão, painel, sistema, auditoria |
 | `GET` | `/api/system/health` | — | Health check (200/503 p/ probes K8s) |
 | `GET` | `/api/system/metrics` | — | Métricas dos pools (JSON) |
 | `GET` | `/api-docs` | — | Swagger UI |
@@ -113,15 +121,18 @@ src/
 │   ├── stream.ts                       # streamRows (pg-cursor)
 │   └── watchdog.ts                     # alerta Discord em saturação do pool
 ├── modules/                            # Domínios da aplicação
-│   ├── auth/                           # login, JWT
-│   │   ├── auth.controller.ts
+│   ├── auth/                           # login, sessão (access + refresh), JWT de serviço
+│   │   ├── auth.controller.ts · auth.service.ts · auth.database.ts
 │   │   └── schemas/auth.schema.ts
 │   ├── user/                           # CRUD de usuário
 │   │   ├── user.controller.ts · user.service.ts · user.database.ts
 │   │   └── schema/user.schema.ts
-│   └── system/                         # health + metrics
-│       ├── system.controller.ts
-│       └── schemas/system.schema.ts
+│   ├── system/                         # health + metrics
+│   │   ├── system.controller.ts
+│   │   └── schemas/system.schema.ts
+│   └── admin/                          # área admin: painel, sistema, auditoria
+│       ├── admin.controller.ts · admin.service.ts · admin.database.ts
+│       └── schema/admin.schema.ts
 └── shared/
     ├── core/                           # Controller base, decorators, swagger, registro
     ├── infra/database/Database.ts      # Classe base de repositórios
@@ -167,7 +178,7 @@ Detalhes em [`doc/arquitetura/decorators.md`](doc/arquitetura/decorators.md).
 
 ## 🔐 Autenticação
 
-JWT assinado com `JWT_SECRET`, entregue em cookie `httpOnly` `token_access`. Dois middlewares (instâncias — use `.bind`):
+Access token JWT curto (15 min) em cookie `httpOnly` `token_access` + refresh token rotativo e revogável em `token_refresh` (detalhes em `doc/modulos/auth/auth.md`). Dois middlewares (instâncias — use `.bind`):
 
 ```typescript
 @Post("/")

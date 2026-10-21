@@ -18,7 +18,7 @@ import logger from "@/shared/utils/logger";
  * - Produção sem CORS_ORIGINS → `false` (nenhuma origem cross-site — fail-closed).
  * - Dev sem CORS_ORIGINS → localhost:3000 por conveniência.
  */
-function resolveCorsOrigins(): string[] | false {
+export function resolveCorsOrigins(): string[] | false {
   const fromEnv = (env.CORS_ORIGINS || "")
     .split(",")
     .map((o) => o.trim())

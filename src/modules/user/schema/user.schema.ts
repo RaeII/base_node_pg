@@ -38,6 +38,8 @@ export type CreateUserInput = z.infer<typeof createUserSchema>;
 export const authenticateUserSchema = z.object({
   identifier: z.string(),
   password: z.string(),
+  /** Login admin: não-admin falha com o mesmo 401 de credencial inválida. */
+  requireAdmin: z.boolean().optional(),
 });
 
 export type AuthenticateUserInput = z.infer<typeof authenticateUserSchema>;
@@ -64,6 +66,22 @@ export type PublicUser = z.infer<typeof publicUserSchema>;
 export const idParamsSchema = z.object({
   id: z.coerce.number().int("id deve ser um inteiro").positive("id deve ser positivo"),
 });
+
+/**
+ * Filtros da listagem (`page`/`limit` ficam com o paginationMiddleware).
+ * `status` default "active" — mesmo comportamento de antes dos filtros.
+ */
+export const listUsersQuerySchema = z.object({
+  search: z
+    .string()
+    .trim()
+    .max(100, "search deve ter no máximo 100 caracteres")
+    .optional()
+    .transform((v) => v || undefined),
+  status: z.enum(["active", "inactive", "all"]).default("active"),
+});
+
+export type ListUsersQuery = z.infer<typeof listUsersQuerySchema>;
 
 // ─── Schemas de Banco de Dados ──────────────────────────────────
 

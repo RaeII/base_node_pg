@@ -75,10 +75,16 @@ export const env = {
 
     AUTHORIZATION: Number(process?.env?.AUTHORIZATION || 0),
     JWT_SECRET: process.env.JWT_SECRET,
-    // TTL do JWT de usuário — sem mecanismo de revogação, mantenha curto
-    JWT_EXPIRES_IN_SECONDS: num(process.env.JWT_EXPIRES_IN_SECONDS, 604_800), // 7 dias
+    // TTL do access token (JWT no cookie token_access) — curto: não é revogável
+    JWT_EXPIRES_IN_SECONDS: num(process.env.JWT_EXPIRES_IN_SECONDS, 900), // 15 min
+    // TTL do refresh token (cookie token_refresh) — deslizante, renovado a cada rotação
+    REFRESH_TOKEN_EXPIRES_IN_SECONDS: num(process.env.REFRESH_TOKEN_EXPIRES_IN_SECONDS, 604_800), // 7 dias
     // TTL do JWT de serviço (POST /auth/create-jwt)
     SERVICE_JWT_EXPIRES_IN_SECONDS: num(process.env.SERVICE_JWT_EXPIRES_IN_SECONDS, 2_592_000), // 30 dias
+    // Sessão admin (login em /auth/admin/login): expira após este tempo SEM uso...
+    ADMIN_SESSION_IDLE_SECONDS: num(process.env.ADMIN_SESSION_IDLE_SECONDS, 900), // 15 min
+    // ...e nunca passa deste teto desde o login admin, mesmo em uso contínuo.
+    ADMIN_SESSION_MAX_SECONDS: num(process.env.ADMIN_SESSION_MAX_SECONDS, 28_800), // 8 h
 
     // ─── Segurança HTTP ───
     // Origens permitidas no CORS, separadas por vírgula. Vazio em produção = nenhuma origem cross-site.

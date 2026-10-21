@@ -1,6 +1,7 @@
 import * as bcrypt from "bcrypt";
 import UserDatabase from "@/modules/user/user.database";
-import type { AuthenticateUserInput, CreateUserInput, DbUserRow, PublicUser, UpdateUserInput } from "./schema/user.schema";
+import AuthDatabase from "@/modules/auth/auth.database";
+import type { AuthenticateUserInput, CreateUserInput, DbUserRow, ListUsersQuery, PublicUser, UpdateUserInput } from "./schema/user.schema";
 import { throwUser, throwInternal } from "@/shared/utils/error";
 import { paginatedResponse, type PaginatedResult } from "@/shared/utils/pagination";
 
@@ -27,17 +28,19 @@ function toPublicUser(row: DbUserRow): PublicUser {
 
 export default class UserService {
   private userDb: UserDatabase;
+  private authDb: AuthDatabase;
 
   constructor() {
     this.userDb = new UserDatabase();
+    this.authDb = new AuthDatabase();
   }
 
   /**
-   * Retorna usuários ativos com paginação.
+   * Retorna usuários com paginação e filtros (busca + status).
    * Os parâmetros de paginação são resolvidos via AsyncLocalStorage.
    */
-  async findAll(): Promise<PaginatedResult<PublicUser>> {
-    const { rows, total } = await this.userDb.findAll();
+  async findAll(filters: ListUsersQuery): Promise<PaginatedResult<PublicUser>> {
+    const { rows, total } = await this.userDb.findAll(filters);
     return paginatedResponse(rows.map(toPublicUser), total);
   }
 
@@ -59,6 +62,7 @@ export default class UserService {
    *
    * Anti-enumeração: inexistente, senha errada e inativo respondem TODOS
    * com o mesmo 401 "Credenciais inválidas", em tempo equivalente.
+   * Com `requireAdmin` (login admin), não-admin também — não revela quem é admin.
    */
   async authenticate(input: AuthenticateUserInput): Promise<PublicUser> {
     const identifier = input.identifier.trim().toLowerCase();
@@ -68,7 +72,7 @@ export default class UserService {
 
     const ok = await bcrypt.compare(password, row?.password || DUMMY_PASSWORD_HASH);
 
-    if (!row || !ok || !row.is_active) {
+    if (!row || !ok || !row.is_active || (input.requireAdmin && !row.is_admin)) {
       throwUser("Credenciais inválidas", 401);
     }
 
@@ -112,11 +116,16 @@ export default class UserService {
    * Atualiza um usuário existente.
    * Valida unicidade de username e email.
    * Se password for enviado, faz o hash.
+   * `actorId` = admin que executa: não pode tirar o próprio acesso (evita lockout).
    */
-  async updateUser(id: number, input: UpdateUserInput): Promise<PublicUser> {
+  async updateUser(id: number, input: UpdateUserInput, actorId?: number | null): Promise<PublicUser> {
     const existing = await this.userDb.findById(id);
     if (!existing) {
       throwUser("Usuário não encontrado", 404);
+    }
+
+    if (actorId === id && (input.is_admin === false || input.is_active === false)) {
+      throwUser("Você não pode remover o próprio acesso de administrador nem desativar a própria conta", 400);
     }
 
     // Verifica unicidade do username (se estiver sendo alterado)
@@ -149,6 +158,12 @@ export default class UserService {
       isAdmin: input.is_admin,
     });
 
+    // Senha trocada ou conta desativada: derruba todas as sessões (refresh tokens).
+    // O access token em uso morre sozinho em até JWT_EXPIRES_IN_SECONDS.
+    if (passwordHash || input.is_active === false) {
+      await this.authDb.revokeAllSessions(id);
+    }
+
     const updated = await this.userDb.findById(id);
     if (!updated) {
       throwInternal("Falha ao atualizar usuário");
@@ -159,8 +174,13 @@ export default class UserService {
 
   /**
    * Desativa um usuário (soft delete).
+   * `actorId` = admin que executa: não pode desativar a si mesmo.
    */
-  async deleteUser(id: number): Promise<void> {
+  async deleteUser(id: number, actorId?: number | null): Promise<void> {
+    if (actorId === id) {
+      throwUser("Você não pode desativar a própria conta", 400);
+    }
+
     const existing = await this.userDb.findById(id);
     if (!existing) {
       throwUser("Usuário não encontrado", 404);
@@ -171,5 +191,19 @@ export default class UserService {
     }
 
     await this.userDb.deactivateUser(id);
+    await this.authDb.revokeAllSessions(id);
+  }
+
+  /**
+   * Encerra todas as sessões do usuário (refresh tokens + elevação admin).
+   * O access token em uso morre sozinho em até JWT_EXPIRES_IN_SECONDS.
+   */
+  async revokeSessions(id: number): Promise<void> {
+    const existing = await this.userDb.findById(id);
+    if (!existing) {
+      throwUser("Usuário não encontrado", 404);
+    }
+
+    await this.authDb.revokeAllSessions(id);
   }
 }

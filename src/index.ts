@@ -6,6 +6,7 @@ import { setupSwagger } from "@/shared/core/swagger/swagger.setup";
 import AuthController from "@/modules/auth/auth.controller";
 import UserController from "@/modules/user/user.controller";
 import SystemController from "@/modules/system/system.controller";
+import AdminController from "@/modules/admin/admin.controller";
 import { drainPool } from "@/db/pool";
 import { startPoolWatchdog, stopPoolWatchdog } from "@/db/watchdog";
 import logger from "@/shared/utils/logger";
@@ -14,6 +15,7 @@ const controllers = [
 	AuthController,
 	UserController,
 	SystemController,
+	AdminController,
 ];
 
 async function startServer() {

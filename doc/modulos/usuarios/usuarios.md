@@ -27,15 +27,16 @@ CRUD completo com paginação, transações PostgreSQL (`withTransaction`) e sof
 
 ## Endpoints
 
-Todas as rotas exigem **JWT + Admin** (`AUTHORIZATION=1`). Tabela: `"user"`.
+Todas as rotas exigem **JWT + sessão admin elevada** (`AUTHORIZATION=1`) — é o CRUD da área administrativa ([[admin]]). Tabela: `"user"`. Mutações são auditadas em `audit_log` na mesma transação.
 
 | Método | Rota | Descrição |
 | --- | --- | --- |
-| `GET` | `/api/user/` | Listar ativos (paginado) |
+| `GET` | `/api/user/` | Listar (paginado, filtros `search`/`status`) |
 | `GET` | `/api/user/:id` | Buscar por ID |
-| `POST` | `/api/user/` | Criar (em `withTransaction`) |
-| `PUT` | `/api/user/:id` | Atualizar parcial (em `withTransaction`) |
-| `DELETE` | `/api/user/:id` | Desativar (soft delete, em `withTransaction`) |
+| `POST` | `/api/user/` | Criar (em `withTransaction`, `user.create`) |
+| `PUT` | `/api/user/:id` | Atualizar parcial (em `withTransaction`, `user.update`) |
+| `DELETE` | `/api/user/:id` | Desativar (soft delete, em `withTransaction`, `user.deactivate`) |
+| `POST` | `/api/user/:id/revoke-sessions` | Encerrar todas as sessões — força novo login (`user.revoke_sessions`) |
 
 As respostas de item vêm envelopadas em `{ "data": ... }`.
 
@@ -47,7 +48,10 @@ O path param `:id` é validado com `idParamsSchema` (`parseSchema(idParamsSchema
 
 `GET /api/user/` usa `paginationMiddleware()` (ver [[paginacao]]).
 
-**Query params:** `page` (default `1`) e `limit` (default `20`, máx `100`).
+**Query params:** `page` (default `1`) e `limit` (default `20`, máx `100`) + filtros validados por `listUsersQuerySchema`:
+
+- `search` — busca parcial (`ILIKE`) em `username`/`email`, máx 100. Curingas `%`/`_` do input são escapados (busca literal).
+- `status` — `active` (default, comportamento original) · `inactive` · `all`.
 
 **Response:**
 
@@ -67,9 +71,11 @@ O path param `:id` é validado com `idParamsSchema` (`parseSchema(idParamsSchema
 
 - **Criação:** valida unicidade de `username` e `email`; faz hash com `bcrypt` (12 rounds); `INSERT` com `{ noRetry: true }` (não-idempotente). `username`/`email` são normalizados para **minúsculas** no schema (unicidade case-insensitive na prática). O helper `UserController.createUser()` centraliza a transação para `POST /api/user/` e `POST /api/auth/signup`.
 - **Senha:** mínimo 8, máximo **72** caracteres (bcrypt trunca silenciosamente acima de 72 bytes).
-- **Atualização:** parcial — só os campos enviados; revalida unicidade ao trocar `username`/`email`; refaz o hash se a senha vier.
+- **Atualização:** parcial — só os campos enviados; revalida unicidade ao trocar `username`/`email`; refaz o hash se a senha vier. Trocar a senha ou desativar (`is_active: false`) **revoga todas as sessões** do usuário ([[auth#Modelo de sessão]]).
 - **Corrida de unicidade:** o check no service é UX; quem garante é a constraint UNIQUE do banco. Se a corrida acontecer, o `23505` vira `409` no `handleError` ([[tratamento-de-erros]]).
-- **Soft delete:** marca `is_active = FALSE` (idempotente). Usuários inativos não aparecem nas listagens, mas os dados são preservados.
+- **Soft delete:** marca `is_active = FALSE` (idempotente) e revoga todas as sessões (refresh tokens) do usuário. Inativos só aparecem na listagem com `status=inactive|all`; reative com `PUT { "is_active": true }`.
+- **Autoproteção do admin:** o admin da sessão (`actorId`) não pode remover o próprio `is_admin`, se desativar (`PUT` ou `DELETE`) — `400`. Evita lockout.
+- **Encerrar sessões:** `revokeSessions()` revoga todas as sessões do usuário (inclusive elevação admin). O access token em uso expira em até 15 min.
 - **Autenticação (`authenticate`)**: anti-enumeração + anti-timing — inexistente, senha errada e inativo respondem o mesmo `401`; hash dummy iguala o tempo de resposta. Ver [[seguranca#Autenticação (módulo user/auth)]].
 - **Saída pública:** `toPublicUser()` nunca retorna o campo `password`.
 
@@ -87,7 +93,8 @@ Definidos em `schema/user.schema.ts` (ver [[schemas-zod]]):
 | `createUserSchema` | Body de criação (`.strict()`, senha 8–72, lowercase em username/email) |
 | `updateUserSchema` | Body de atualização (campos opcionais, `.strict()`) |
 | `idParamsSchema` | Path param `:id` (`z.coerce.number().int().positive()`) |
-| `authenticateUserSchema` | Input de autenticação (usado pelo [[auth]]) |
+| `listUsersQuerySchema` | Query da listagem (`search`, `status`) |
+| `authenticateUserSchema` | Input de autenticação (usado pelo [[auth]]; `requireAdmin` no login admin) |
 | `publicUserSchema` | Usuário público (sem `password`) |
 | `dbUserRowSchema` / `DbUserRow` | Linha do banco **sem** `password` (projeção `USER_COLUMNS`) |
 | `DbUserAuthRow` | `DbUserRow` + `password` — exclusivo do fluxo de login |
