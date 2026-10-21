@@ -90,6 +90,29 @@ export const createJwtBodySchema = z
 
 export type CreateJwtBody = z.infer<typeof createJwtBodySchema>;
 
+/** Login com Google: `credential` (ID token JWT) devolvido pelo Google Identity Services. */
+export const googleAuthSchema = z
+  .object({
+    credential: z
+      .string({ error: "credential é obrigatório" })
+      .min(1, "credential é obrigatório")
+      .max(4096, "credential inválido"),
+  })
+  .strict();
+
+/** 1º acesso pelo Google: prova assinada devolvida pelo /auth/google + username confirmado. */
+export const googleRegisterSchema = z
+  .object({
+    registrationToken: z
+      .string({ error: "registrationToken é obrigatório" })
+      .min(1, "registrationToken é obrigatório")
+      .max(4096, "registrationToken inválido"),
+    username: createUserSchema.shape.username,
+  })
+  .strict();
+
+export type GoogleRegisterInput = z.infer<typeof googleRegisterSchema>;
+
 // ─── Refresh token ──────────────────────────────────────────────
 
 /**
@@ -139,6 +162,18 @@ export const loginResponseSchema = z.object({
 
 /** Schema de resposta de sucesso ao cadastrar usuário */
 export const signupResponseSchema = loginResponseSchema;
+
+/** POST /auth/google (200): sessão aberta OU 1º acesso pendente de confirmação. */
+export const googleAuthResponseSchema = z.discriminatedUnion("status", [
+  loginResponseSchema.extend({ status: z.literal("authenticated") }),
+  z.object({
+    status: z.literal("registration_required"),
+    registrationToken: z.string(),
+    expiresAt: z.string(),
+    email: z.string(),
+    username: z.string(),
+  }),
+]);
 
 /** Schema de resposta do refresh (200) — mesmo formato do login */
 export const refreshResponseSchema = loginResponseSchema;

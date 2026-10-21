@@ -44,8 +44,8 @@ Registrados em `src/shared/loaders/express.ts`, **antes** das rotas, nesta ordem
 | Limiter | Escopo | Default | Observação |
 | --- | --- | --- | --- |
 | `globalRateLimiter` | Toda a API (aplicado nos loaders) | 300 req/min por IP | `RATE_LIMIT_WINDOW_MS` / `RATE_LIMIT_MAX` |
-| `loginRateLimiter` | `POST /auth/login` e `POST /auth/admin/login` | 5 falhas/min por IP | `skipSuccessfulRequests: true` — só tentativas **falhas** contam; bucket compartilhado entre os dois logins |
-| `signupRateLimiter` | `POST /auth/signup` | 5 tentativas/min por IP | Conta sucesso e falha — reduz criação abusiva de contas |
+| `loginRateLimiter` | `POST /auth/login`, `POST /auth/admin/login` e `POST /auth/google` | 5 falhas/min por IP | `skipSuccessfulRequests: true` — só tentativas **falhas** contam; bucket compartilhado entre os logins |
+| `signupRateLimiter` | `POST /auth/signup` e `POST /auth/google/register` | 5 tentativas/min por IP | Conta sucesso e falha — reduz criação abusiva de contas |
 
 > [!tip] Endpoint novo sensível a brute-force?
 > Login, reset de senha, verificação de código, etc. → crie um limiter dedicado no mesmo arquivo e aplique com `@Middleware(meuLimiter)`. Não confie só no limite global.
@@ -70,6 +70,7 @@ Os atributos dos cookies são centralizados em `authCookieOptions()` (`auth.cont
 - **Dois tipos de token**, distinguidos pelo claim `type`:
   - `type: "user"` (login/signup/refresh) — é o **access token**: carrega `sub`, `sid` (id da sessão), `userId`, `username`, `email`. TTL `JWT_EXPIRES_IN_SECONDS` (default **15 min**); a sessão continua pelo refresh token ([[auth#Modelo de sessão]]).
   - `type: "service"` (`POST /auth/create-jwt`) — carrega só `name`. **Não tem `sid`**, então nunca passa no `adminMiddleware`. TTL `SERVICE_JWT_EXPIRES_IN_SECONDS` (default 30 dias).
+- **Prova de cadastro Google** (`type: "registration"`, 15 min) é assinada com chave **derivada** do `JWT_SECRET` (HMAC com contexto) — nunca valida no `jwtMiddleware`. Vai no body, não em cookie ([[auth#POST `/api/auth/google`]]).
 - **Nenhum token carrega permissão de admin.** O `adminMiddleware` valida a sessão admin elevada **no banco** a cada request (ver abaixo).
 
 - **`401` vs `403`:** token ausente, inválido ou expirado → **`401`** (o front renova a sessão ou volta ao login). `403` é só "autenticado sem permissão" (`adminOnly`) e **não** desloga.
@@ -100,8 +101,10 @@ Regras implementadas em `UserService.authenticate()` — **preserve-as ao adapta
 - **Anti-timing:** quando o usuário não existe, compara contra `DUMMY_PASSWORD_HASH` — a resposta demora o mesmo que uma senha errada (sem isso, o tempo de resposta revela quais logins existem).
 - **Senha:** bcrypt custo 12. Política: mínimo 8, **máximo 72** (bcrypt trunca silenciosamente acima de 72 bytes).
 - **Normalização:** `username`/`email` são convertidos para minúsculas nos schemas de criação/atualização e no identifier do login (o banco compara case-sensitive).
-- **Cadastro público:** `signupSchema` aceita só `username`, `email` e `password`; o controller força `is_active: true` e `is_admin: false`.
-- **Auditoria:** login admin → `logger.info/warn("Admin login success|failed")` + `audit_log`; login com sucesso → `logger.info("Login success", { userId, ip })`; falha 401 → `logger.warn("Login failed", { ip })`; signup com sucesso → `logger.info("Signup success", { userId, ip })`; reuso de refresh token → `logger.warn("Refresh token reuse detected — session revoked", { userId, ip })`; emissão de token de serviço → `logger.info("Service JWT issued", ...)`. Nunca logue senha, hash ou token.
+- **Cadastro público:** `signupSchema` aceita só `username`, `email` e `password`; o controller força `is_active: true` e `is_admin: false`. Cadastro pelo Google idem (`googleRegisterSchema`: só prova + `username`).
+- **Conta sem senha (Google):** `password = NULL`; o login por senha compara contra `DUMMY_PASSWORD_HASH` → mesmo `401`.
+- **Login com Google:** ID token verificado com `google-auth-library` (`aud` = `GOOGLE_CLIENT_ID`). Vincular a uma conta existente pelo e-mail só com `email_verified=true` (evita account takeover). Sessão aberta é **comum** — admin continua exigindo o login admin por senha.
+- **Auditoria:** login admin → `logger.info/warn("Admin login success|failed")` + `audit_log`; login com sucesso → `logger.info("Login success", { userId, ip })`; falha 401 → `logger.warn("Login failed", { ip })`; signup com sucesso → `logger.info("Signup success", { userId, ip })`; Google → `logger.info("Login (google) success" | "Signup (google) success", { userId, ip })`; reuso de refresh token → `logger.warn("Refresh token reuse detected — session revoked", { userId, ip })`; emissão de token de serviço → `logger.info("Service JWT issued", ...)`. Nunca logue senha, hash ou token.
 
 ---
 
@@ -134,6 +137,7 @@ Complementa o checklist de [[novo-modulo]]:
 | `SERVICE_JWT_EXPIRES_IN_SECONDS` | `2592000` (30d) | TTL do token de serviço |
 | `ADMIN_SESSION_IDLE_SECONDS` | `900` (15 min) | Elevação admin expira após esse tempo sem uso (deslizante) |
 | `ADMIN_SESSION_MAX_SECONDS` | `28800` (8 h) | Teto absoluto da elevação admin desde o login admin |
+| `GOOGLE_CLIENT_ID` | — | Client ID público do OAuth; `audience` exigido no ID token do Google (obrigatório para `/auth/google`) |
 | `CORS_ORIGINS` | vazio | Origens permitidas, separadas por vírgula |
 | `COOKIE_DOMAIN` | vazio (host-only) | Domain do cookie de auth |
 | `COOKIE_SAMESITE` | `lax` | `lax` · `strict` · `none` |

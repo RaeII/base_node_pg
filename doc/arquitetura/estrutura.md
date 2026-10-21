@@ -28,8 +28,8 @@ base_node_pg/
 │   ├── modules/                          # Domínios da aplicação
 │   │   ├── auth/
 │   │   │   ├── auth.controller.ts
-│   │   │   ├── auth.service.ts           # sessão: refresh rotativo, reuso, revogação
-│   │   │   ├── auth.database.ts          # tabela auth_session
+│   │   │   ├── auth.service.ts           # sessão: refresh rotativo, reuso, revogação + login com Google
+│   │   │   ├── auth.database.ts          # tabelas auth_session e auth_identity
 │   │   │   └── schemas/auth.schema.ts
 │   │   ├── user/
 │   │   │   ├── user.controller.ts
@@ -143,6 +143,7 @@ Definidas em [`.env`](../../.env.example) e tipadas em [`src/config/index.ts`](.
 | `REFRESH_TOKEN_EXPIRES_IN_SECONDS` | TTL deslizante do refresh token / sessão (default 604 800 = 7 dias) |
 | `SERVICE_JWT_EXPIRES_IN_SECONDS` | TTL do JWT de serviço (default 2 592 000 = 30 dias) |
 | `ADMIN_SESSION_IDLE_SECONDS` / `ADMIN_SESSION_MAX_SECONDS` | Sessão admin: expira sem uso (default 900 = 15 min) / teto desde o login admin (default 28 800 = 8 h) |
+| `GOOGLE_CLIENT_ID` | Client ID público do OAuth Google (login com Google — `audience` do ID token). Mesmo valor do `VITE_GOOGLE_CLIENT_ID` do front |
 | `CORS_ORIGINS` | Origens CORS separadas por vírgula (vazio em prod = nenhuma) |
 | `COOKIE_DOMAIN` / `COOKIE_SAMESITE` | Atributos do cookie de auth (default: host-only / `lax`) |
 | `TRUST_PROXY` | Nº de proxies confiáveis (necessário p/ rate limit atrás de proxy) |

@@ -32,7 +32,7 @@ Boilerplate de API REST com **TypeScript + Express 5 + PostgreSQL**, executado c
 | Linguagem | TypeScript 5.3 (`strict`, decorators) |
 | Validação | Zod v4 (`toJSONSchema` nativo) |
 | Banco | PostgreSQL — `pg` (node-postgres, pool duplo write/read) |
-| Auth | Access token JWT (15 min) + refresh token rotativo, ambos em cookie httpOnly (`sameSite=lax`) + bcrypt · sessão admin elevada (step-up) validada no banco |
+| Auth | Access token JWT (15 min) + refresh token rotativo, ambos em cookie httpOnly (`sameSite=lax`) + bcrypt · login com Google (GIS ID token, `google-auth-library`) · sessão admin elevada (step-up) validada no banco |
 | Segurança HTTP | helmet + rate limit (`express-rate-limit`) + CORS por env |
 | Docs | Swagger UI / OpenAPI 3.0 (gerado dos decorators) |
 | Observabilidade | Winston (rotação diária) + alertas Discord (com throttle) |
@@ -57,7 +57,7 @@ Boilerplate de API REST com **TypeScript + Express 5 + PostgreSQL**, executado c
 
 ### 📦 Módulos
 
-- [[auth|Módulo Auth]] — login, sessão (access + refresh rotativo), token de serviço
+- [[auth|Módulo Auth]] — login, login com Google, sessão (access + refresh rotativo), token de serviço
 - [[usuarios|Módulo Usuários]] — CRUD completo, paginação, soft delete
 - [[sistema|Módulo Sistema]] — health check e métricas dos pools
 - [[admin|Módulo Admin]] — área administrativa: sessão admin elevada, painel, sistema, auditoria
@@ -87,6 +87,8 @@ Boilerplate de API REST com **TypeScript + Express 5 + PostgreSQL**, executado c
 | `POST` | `/api/auth/login` | Rate limit | Login → cookies `token_access` + `token_refresh` |
 | `POST` | `/api/auth/admin/login` | Rate limit | Login admin: reautentica, abre sessão nova **elevada** (15 min sem uso / 8 h máx.) |
 | `POST` | `/api/auth/signup` | Rate limit | Cadastro de usuário comum com email obrigatório → cookies de sessão |
+| `POST` | `/api/auth/google` | Rate limit | Login/cadastro com Google (ID token GIS) → cookies de sessão **ou** `registration_required` (1º acesso) |
+| `POST` | `/api/auth/google/register` | Rate limit | Conclui o 1º acesso pelo Google (prova + username) → cria conta sem senha + cookies |
 | `POST` | `/api/auth/refresh` | Cookie refresh | Renova a sessão (rotação do refresh token) |
 | `GET` | `/api/auth/me` | JWT | Usuário da sessão (lido do banco) |
 | `POST` | `/api/auth/logout` | — | Revoga a sessão e remove os cookies |

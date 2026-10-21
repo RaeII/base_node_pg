@@ -14,6 +14,9 @@ import {
   signupSchema,
   createJwtBodySchema,
   createJwtResponseSchema,
+  googleAuthSchema,
+  googleAuthResponseSchema,
+  googleRegisterSchema,
   errorResponseSchema,
   loginResponseSchema,
   signupResponseSchema,
@@ -268,6 +271,58 @@ class AuthController extends Controller {
         data: user,
         expiresIn,
       });
+    } catch (err) {
+      return handleError(err, res);
+    }
+  }
+
+  @Post("/google")
+  @Middleware(loginRateLimiter)
+  @ApiSummary("Login com Google", "Entra via ID token do Google (GIS). Vincula à conta existente com o mesmo e-mail (verificado); no 1º acesso não cria nada — devolve e-mail + username sugerido para o usuário confirmar em /auth/google/register.")
+  @ApiBody(googleAuthSchema, "ID token (credential) do Google Identity Services")
+  @ApiResponse(200, "Autenticado ou dados pendentes de confirmação", googleAuthResponseSchema)
+  @ApiResponse(400, "Dados inválidos ou e-mail do Google não verificado", loginErrorResponseSchema)
+  @ApiResponse(401, "Token do Google inválido ou expirado", errorResponseSchema)
+  @ApiResponse(403, "Conta desativada", errorResponseSchema)
+  async google(req: Request, res: Response) {
+    try {
+      const { credential } = parseSchema(googleAuthSchema, req.body);
+
+      const result = await this.authService.authenticateWithGoogle(credential);
+      if (result.status === "registration_required") {
+        return res.status(200).json(result);
+      }
+
+      const session = await this.authService.createSession(result.user.id);
+      const expiresIn = this.issueAuthCookies(res, result.user, session.id, session.refreshToken);
+
+      logger.info("Login (google) success", { userId: result.user.id, ip: req.ip });
+
+      return res.status(200).json({ status: "authenticated", data: result.user, expiresIn });
+    } catch (err) {
+      return handleError(err, res);
+    }
+  }
+
+  @Post("/google/register")
+  @Middleware(signupRateLimiter)
+  @ApiSummary("Cadastro com Google", "Conclui o 1º acesso pelo Google: cria a conta (sem senha) com o e-mail da prova assinada (registrationToken, 15 min) e o username escolhido, abre a sessão e retorna os cookies.")
+  @ApiBody(googleRegisterSchema, "Prova do /auth/google + username confirmado")
+  @ApiResponse(201, "Cadastro realizado com sucesso", signupResponseSchema)
+  @ApiResponse(400, "Dados inválidos ou verificação expirada", loginErrorResponseSchema)
+  @ApiResponse(409, "Username ou e-mail já está em uso", errorResponseSchema)
+  async googleRegister(req: Request, res: Response) {
+    try {
+      const data = parseSchema(googleRegisterSchema, req.body);
+
+      const user = await withTransaction(() => this.authService.registerWithGoogle(data));
+
+      const session = await this.authService.createSession(user.id);
+      const expiresIn = this.issueAuthCookies(res, user, session.id, session.refreshToken);
+
+      logger.info("Signup (google) success", { userId: user.id, ip: req.ip });
+
+      return res.status(201).json({ data: user, expiresIn });
     } catch (err) {
       return handleError(err, res);
     }

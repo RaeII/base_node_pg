@@ -49,7 +49,8 @@ Prefixo numérico crescente — execução em ordem lexicográfica:
 0001_initial_user.sql
 0002_auth_session.sql
 0003_admin.sql
-0004_add_orders.sql
+0004_google_auth.sql
+0005_add_orders.sql
 ```
 
 ### Imutabilidade

@@ -103,13 +103,13 @@ export const dbUserRowSchema = z.object({
 
 export type DbUserRow = z.infer<typeof dbUserRowSchema>;
 
-/** Linha com hash de senha — exclusiva do fluxo de autenticação. */
-export type DbUserAuthRow = DbUserRow & { password: string };
+/** Linha com hash de senha — exclusiva do fluxo de autenticação. NULL = conta sem senha (Google). */
+export type DbUserAuthRow = DbUserRow & { password: string | null };
 
 export const createUserDbInputSchema = z.object({
   username: z.string(),
   email: z.string().nullable(),
-  passwordHash: z.string(),
+  passwordHash: z.string().nullable(), // NULL = conta sem senha (login com Google)
   isActive: z.boolean(),
   isAdmin: z.boolean(),
 });

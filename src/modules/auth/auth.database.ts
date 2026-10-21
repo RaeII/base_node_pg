@@ -1,6 +1,9 @@
 import Database from "@/shared/infra/database/Database";
 import type { DbAuthSessionRow } from "./schemas/auth.schema";
 
+/** Provedores de login externos (`auth_identity.provider`). */
+export type AuthProvider = "google";
+
 // Tabela guarda hash de token — projeção explícita, nunca SELECT *.
 const SESSION_COLUMNS = `id, user_id, token_hash, previous_token_hash, revoked_at`;
 
@@ -96,6 +99,26 @@ export default class AuthDatabase extends Database {
       `UPDATE auth_session SET revoked_at = NOW()
         WHERE id = $1 AND $2 IN (token_hash, previous_token_hash) AND revoked_at IS NULL`,
       [id, tokenHash]
+    );
+  }
+
+  /** Usuário vinculado à conta do provedor (ex.: `sub` do Google), ou null. */
+  async findIdentityUserId(provider: AuthProvider, providerAccountId: string): Promise<number | null> {
+    const result = await this.query<{ user_id: string }>(
+      `SELECT user_id FROM auth_identity WHERE provider = $1 AND provider_account_id = $2`,
+      [provider, providerAccountId]
+    );
+    const userId = result.rows[0]?.user_id;
+    return userId === undefined ? null : Number(userId); // BIGINT chega como string do driver
+  }
+
+  /** Vincula a conta do provedor ao usuário. ON CONFLICT torna idempotente (duplo clique/duas abas). */
+  async createIdentity(userId: number, provider: AuthProvider, providerAccountId: string): Promise<void> {
+    await this.query(
+      `INSERT INTO auth_identity (user_id, provider, provider_account_id)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (provider, provider_account_id) DO NOTHING`,
+      [userId, provider, providerAccountId]
     );
   }
 

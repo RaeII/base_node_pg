@@ -70,7 +70,7 @@ O path param `:id` é validado com `idParamsSchema` (`parseSchema(idParamsSchema
 ## Regras de negócio (Service)
 
 - **Criação:** valida unicidade de `username` e `email`; faz hash com `bcrypt` (12 rounds); `INSERT` com `{ noRetry: true }` (não-idempotente). `username`/`email` são normalizados para **minúsculas** no schema (unicidade case-insensitive na prática). O helper `UserController.createUser()` centraliza a transação para `POST /api/user/` e `POST /api/auth/signup`.
-- **Senha:** mínimo 8, máximo **72** caracteres (bcrypt trunca silenciosamente acima de 72 bytes).
+- **Senha:** mínimo 8, máximo **72** caracteres (bcrypt trunca silenciosamente acima de 72 bytes). Coluna **nullable** (migration `0004_google_auth`): conta criada pelo login com Google tem `password = NULL` e não entra por senha até um admin definir uma ([[auth#POST `/api/auth/google/register`]]).
 - **Atualização:** parcial — só os campos enviados; revalida unicidade ao trocar `username`/`email`; refaz o hash se a senha vier. Trocar a senha ou desativar (`is_active: false`) **revoga todas as sessões** do usuário ([[auth#Modelo de sessão]]).
 - **Corrida de unicidade:** o check no service é UX; quem garante é a constraint UNIQUE do banco. Se a corrida acontecer, o `23505` vira `409` no `handleError` ([[tratamento-de-erros]]).
 - **Soft delete:** marca `is_active = FALSE` (idempotente) e revoga todas as sessões (refresh tokens) do usuário. Inativos só aparecem na listagem com `status=inactive|all`; reative com `PUT { "is_active": true }`.
@@ -97,7 +97,7 @@ Definidos em `schema/user.schema.ts` (ver [[schemas-zod]]):
 | `authenticateUserSchema` | Input de autenticação (usado pelo [[auth]]; `requireAdmin` no login admin) |
 | `publicUserSchema` | Usuário público (sem `password`) |
 | `dbUserRowSchema` / `DbUserRow` | Linha do banco **sem** `password` (projeção `USER_COLUMNS`) |
-| `DbUserAuthRow` | `DbUserRow` + `password` — exclusivo do fluxo de login |
+| `DbUserAuthRow` | `DbUserRow` + `password` (`string \| null`) — exclusivo do fluxo de login |
 | `userResponseSchema` / `createUserResponseSchema` | Respostas Swagger |
 | `usersListResponseSchema` | Listagem paginada (`createPaginatedSchema(publicUserSchema)`) |
 | `messageResponseSchema` / `validationErrorResponseSchema` | Mensagem / erro de validação |

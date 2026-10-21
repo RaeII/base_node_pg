@@ -86,6 +86,11 @@ export const env = {
     // ...e nunca passa deste teto desde o login admin, mesmo em uso contínuo.
     ADMIN_SESSION_MAX_SECONDS: num(process.env.ADMIN_SESSION_MAX_SECONDS, 28_800), // 8 h
 
+    // ─── Login com Google (GIS — verificação de ID token) ───
+    // Client ID público do OAuth. É o `audience` verificado no ID token; sem
+    // client secret (fluxo de verificação de ID token não troca código).
+    GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID,
+
     // ─── Segurança HTTP ───
     // Origens permitidas no CORS, separadas por vírgula. Vazio em produção = nenhuma origem cross-site.
     CORS_ORIGINS: process.env.CORS_ORIGINS,

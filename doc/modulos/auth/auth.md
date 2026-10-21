@@ -8,9 +8,9 @@ tags:
 
 # Módulo Auth
 
-Autenticação de usuários com **access token curto + refresh token rotativo** (ambos em cookie httpOnly) e geração de tokens JWT de serviço.
+Autenticação de usuários com **access token curto + refresh token rotativo** (ambos em cookie httpOnly), **login com Google** (sem senha) e geração de tokens JWT de serviço.
 
-**Pasta:** [`src/modules/auth/`](../../../src/modules/auth/) — `auth.controller.ts` (HTTP + cookies), `auth.service.ts` (sessão, rotação, reuso), `auth.database.ts` (tabela `auth_session`) + `schemas/auth.schema.ts`.
+**Pasta:** [`src/modules/auth/`](../../../src/modules/auth/) — `auth.controller.ts` (HTTP + cookies), `auth.service.ts` (sessão, rotação, reuso, Google), `auth.database.ts` (tabelas `auth_session` e `auth_identity`) + `schemas/auth.schema.ts`.
 
 > [!note] Depende do módulo de usuários
 > O login usa `UserService.authenticate()`; o signup reutiliza `UserController.createUser()` para criar usuário comum em transação. Ver [[usuarios|Módulo Usuários]].
@@ -133,6 +133,72 @@ Cria uma conta de usuário comum, abre uma sessão e define os cookies de sessã
 
 ---
 
+### POST `/api/auth/google`
+
+Login **e** cadastro com Google na mesma rota (mesmo padrão do cidoa — clicar em "entrar" ou "criar conta" faz o mesmo). Recebe o `credential` (ID token JWT) que o **Google Identity Services** (GIS) devolve no front. Sem middleware de auth; com `loginRateLimiter` (só falhas contam).
+
+**Body** (`googleAuthSchema`, `.strict()`):
+
+```json
+{ "credential": "eyJ...ID_token_do_Google" }
+```
+
+Fluxo em `AuthService.authenticateWithGoogle()`:
+
+1. **Verifica o ID token** com `google-auth-library` (`OAuth2Client.verifyIdToken`, `audience = GOOGLE_CLIENT_ID`): assinatura (JWKS do Google, cacheado), `aud`, `iss` e expiração. Nenhum campo do payload é confiável sem isso.
+2. **Identidade Google já vinculada** (`auth_identity` `provider='google'`, `provider_account_id=<sub>`) → entra.
+3. Senão, exige `email_verified=true`; **e-mail já tem conta** (ex.: cadastro por senha) → **vincula** o Google a ela e entra.
+4. Senão (1º acesso) → **não cria nada**: devolve `registration_required` com `email` (verificado, não editável) e `username` **sugerido** (do nome do Google, sem acento, `[a-z0-9_]`; colisão → sufixo numérico). O usuário confirma em `POST /api/auth/google/register`.
+
+Nos casos 2 e 3 abre sessão igual ao login (`createSession` + cookies `token_access`/`token_refresh`) e atualiza `last_login_at`.
+
+**Response 200 — conta existente:** `{ "status": "authenticated", "data": PublicUser, "expiresIn": 900 }` + cookies.
+
+**Response 200 — 1º acesso** (sem cookie):
+
+```json
+{
+  "status": "registration_required",
+  "registrationToken": "eyJ...",
+  "expiresAt": "2026-10-21T12:15:00.000Z",
+  "email": "maria@gmail.com",
+  "username": "mariasilva"
+}
+```
+
+`registrationToken` — JWT HS256 de 15 min, `type=registration`, `sub=<email>`, `gsub=<sub do Google>`, assinado com chave **derivada** do `JWT_SECRET` (HMAC com contexto) → nunca valida como token de sessão.
+
+**Erros:** `400` (validação ou e-mail do Google não verificado), `401` (ID token inválido/expirado), `403` (conta desativada), `429` (rate limit), `500` (`GOOGLE_CLIENT_ID` ausente).
+
+> [!important] Decisão: colisão de e-mail (Google × conta por senha)
+> Se o e-mail do Google **já tem conta**, vinculamos em vez de duplicar (**uma pessoa = uma conta por e-mail**). Só é seguro porque o Google marca `email_verified=true`; sem isso, não vincula nem cria. A conta continua aceitando a senha antiga.
+
+> [!note] Admin e conta sem senha
+> Login com Google abre sessão **comum** — a área admin continua exigindo `POST /auth/admin/login` (senha, step-up). Conta criada pelo Google tem `password = NULL`: o login por senha compara contra o hash dummy e responde o mesmo `401`. Um admin pode definir senha via `PUT /api/user/:id`.
+
+---
+
+### POST `/api/auth/google/register`
+
+Conclui o 1º acesso pelo Google. Com `signupRateLimiter`. **Body** (`googleRegisterSchema`, `.strict()`):
+
+```json
+{ "registrationToken": "eyJ...", "username": "mariasilva" }
+```
+
+- `registrationToken` — prova devolvida pelo `/auth/google`; e-mail e `sub` vêm do token assinado, nunca do body.
+- `username` — obrigatório, 3–45, normalizado para minúsculas (mesma regra do signup).
+- Em `withTransaction`: cria o usuário com `password = NULL`, `is_active = true`, `is_admin = false` + grava `auth_identity` (`google`, `<sub>`). As `UNIQUE` de `email`/`username` fecham corridas (`23505` → `409`).
+
+**Response 201:** `{ "data": PublicUser, "expiresIn": 900 }` + cookies de sessão.
+
+**Erros:** `400` (validação ou prova inválida/expirada — o front volta a pedir o Google), `409` (e-mail ou username em uso), `429` (rate limit).
+
+> [!note] Fluxo escolhido: GIS ID token (sem client secret)
+> Só `GOOGLE_CLIENT_ID` é necessário — o front usa o botão "Sign in with Google", recebe o ID token e faz `POST /auth/google`. Não usamos authorization-code (exigiria `GOOGLE_CLIENT_SECRET`) porque só autenticamos, não acessamos APIs do Google. No Google Console, registre a **origem** do front em *Origens JavaScript autorizadas* (ex.: `http://localhost:5173`); URI de redirecionamento não é usada.
+
+---
+
 ### POST `/api/auth/refresh`
 
 Troca o refresh token (cookie `token_refresh`) por um novo access token **e** um novo refresh token (rotação). Sem body e sem middleware de auth (o access normalmente já venceu). Roda em `withTransaction` com `SELECT … FOR UPDATE` na sessão.
@@ -208,17 +274,18 @@ Proteções aplicadas neste módulo (detalhes e racional em [[seguranca]]):
 
 - **Anti-enumeração + anti-timing** — inexistente, senha errada e inativo respondem o mesmo `401`; usuário inexistente compara contra hash dummy para igualar o tempo de resposta.
 - **Rate limit no login** — `loginRateLimiter`, conta só tentativas falhas.
-- **Rate limit no signup** — `signupRateLimiter`, conta tentativas bem-sucedidas e falhas para reduzir criação abusiva de contas.
+- **Rate limit no signup** — `signupRateLimiter`, conta tentativas bem-sucedidas e falhas para reduzir criação abusiva de contas (também no `/auth/google/register`).
+- **Login com Google** — ID token verificado pela lib oficial (`aud` = `GOOGLE_CLIENT_ID`); vínculo por e-mail só com `email_verified`; prova de cadastro assinada com chave derivada (não vira sessão). Ver [[#POST `/api/auth/google`]].
 - **Cadastro público sem admin** — `signupSchema` não aceita flags administrativas e o controller força `is_admin: false`.
 - **Login admin separado (step-up)** — reautenticação, sessão nova, timeout curto e validação no banco a cada request. Ver [[admin]].
 - **JWT endurecido** — `algorithms: ["HS256"]` + `issuer` fixos na verificação; claim `type` distingue token de usuário e de serviço; `JWT_SECRET` mínimo de 32 chars validado no boot.
 - **Cookies endurecidos** — `httpOnly`, `secure` em produção, `sameSite=lax` por default (defesa CSRF), host-only por default; refresh restrito a `path=/api/auth`. Atributos centralizados em `authCookieOptions()`.
 - **Refresh token rotativo** — só o SHA-256 é gravado; rotação a cada uso; reuso revoga a sessão; logout, troca de senha e desativação revogam. Ver [[#Modelo de sessão]].
-- **Auditoria** — sucesso/falha de login, sucesso de signup, reuso de refresh token e emissão de token de serviço vão para o Winston (nunca senha/token).
+- **Auditoria** — sucesso/falha de login, sucesso de signup, login/cadastro com Google (`Login (google) success`, `Signup (google) success`), reuso de refresh token e emissão de token de serviço vão para o Winston (nunca senha/token).
 - **Leitura de cookie via `cookie-parser`** — registrado nos loaders pré-rota; sem ele `req.cookies` seria `undefined` e o JWT nunca seria lido. Ver [[middlewares-auth]].
 
 > [!tip] Antes de produção
-> Rode as migrations `0002_auth_session.sql` e `0003_admin.sql`, defina `CORS_ORIGINS`, avalie `COOKIE_DOMAIN`/`COOKIE_SAMESITE` e mantenha `AUTHORIZATION=1` (o boot exige). Checklist completo em [[seguranca]].
+> Rode as migrations `0002_auth_session.sql`, `0003_admin.sql` e `0004_google_auth.sql`, defina `GOOGLE_CLIENT_ID`, `CORS_ORIGINS`, avalie `COOKIE_DOMAIN`/`COOKIE_SAMESITE` e mantenha `AUTHORIZATION=1` (o boot exige). Checklist completo em [[seguranca]].
 
 ---
 
@@ -228,5 +295,5 @@ Proteções aplicadas neste módulo (detalhes e racional em [[seguranca]]):
 - [[middlewares-auth|Middlewares de Autenticação]]
 - [[admin|Módulo Admin]] — sessão admin elevada e auditoria
 - [[usuarios|Módulo Usuários]] — `authenticate()`, `createUser()` e `is_admin`
-- [[schemas-zod|Schemas Zod]] — `loginSchema`, `signupSchema`, `createJwtBodySchema`
+- [[schemas-zod|Schemas Zod]] — `loginSchema`, `signupSchema`, `googleAuthSchema`, `googleRegisterSchema`, `createJwtBodySchema`
 - [[tratamento-de-erros|Tratamento de Erros]] — `parseSchema`, `handleError`
